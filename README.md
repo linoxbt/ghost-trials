@@ -129,6 +129,8 @@ See [evaluation methodology and remaining validation](docs/EVALUATION.md), [free
 
 For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. The public development preview stays synthetic until an authorized operator configures and validates the external stack.
 
+For the hosted frontend and backend proxy configuration, see [Netlify deployment](docs/NETLIFY.md). Netlify needs a public HTTPS FastAPI origin; model and GPU credentials stay on the backend services.
+
 ## License
 
 MIT
