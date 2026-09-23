@@ -1,0 +1,28 @@
+services:
+  cosmos:
+    image: nvcr.io/nim/nvidia/cosmos3-generator:${COSMOS_NIM_TAG:-1.0.0}
+    restart: unless-stopped
+    shm_size: 32gb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      NGC_API_KEY: ${NGC_API_KEY:?Set NGC_API_KEY}
+    volumes:
+      - ${COSMOS_CACHE_DIR:-/var/lib/ghost-trials/nim-cache}:/opt/nim/.cache
+    ports:
+      - "${COSMOS_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 60
+      start_period: 30m

@@ -1,0 +1,46 @@
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: workers/isaac/Dockerfile
+      args:
+        ARENA_IMAGE: ${ARENA_IMAGE:?Set ARENA_IMAGE to a pinned Isaac/robotics base image}
+    image: ghost-trials-worker:${GHOST_WORKER_TAG:-local}
+    restart: unless-stopped
+    network_mode: host
+    ipc: host
+    environment:
+      OMNI_KIT_ACCEPT_EULA: ${OMNI_KIT_ACCEPT_EULA:?Set YES after accepting the Isaac Sim license}
+      ACCEPT_EULA: ${ACCEPT_EULA:?Set Y after accepting the Isaac Sim license}
+      ISAAC_WORKER_TOKEN: ${ISAAC_WORKER_TOKEN:?Set ISAAC_WORKER_TOKEN}
+      ISAAC_WORKER_PUBLIC_BASE_URL: ${ISAAC_WORKER_PUBLIC_BASE_URL:?Set ISAAC_WORKER_PUBLIC_BASE_URL}
+      ISAAC_WORKER_OUTPUT_ROOT: /data/ghost-trials
+      ISAAC_RUNNER_COMMAND: python /app/workers/isaac/trial_runner.py
+      ISAAC_RUNNER_TIMEOUT_SECONDS: ${ISAAC_RUNNER_TIMEOUT_SECONDS:-1800}
+      ISAAC_WORKER_BACKEND: ${ISAAC_WORKER_BACKEND:-gear_sonic_sim}
+      ISAAC_WORKER_REQUIRE_GPU: "true"
+      ISAAC_WORKER_REQUIRE_POLICY: "true"
+      GHOST_WORKER_COMMIT: ${GHOST_WORKER_COMMIT:-unknown}
+      GR00T_POLICY_HOST: ${GR00T_POLICY_HOST:-127.0.0.1}
+      GR00T_POLICY_PORT: ${GR00T_POLICY_PORT:-5550}
+      GR00T_CHECKPOINT: ${GR00T_CHECKPOINT:?Set the served checkpoint path}
+      GR00T_CHECKPOINT_DIGEST: ${GR00T_CHECKPOINT_DIGEST:?Set the served checkpoint digest}
+      ROBOTICS_WORKDIR: /opt/robotics
+      GEAR_SONIC_ROOT: /opt/robotics/GR00T-WholeBodyControl
+      ISAAC_ARENA_ROOT: /opt/robotics/IsaacLab-Arena
+      ISAAC_ARENA_PYTHON: ${ISAAC_ARENA_PYTHON:-python}
+      PYTHONPATH: /app
+      GEAR_SONIC_SIM_COMMAND: ${GEAR_SONIC_SIM_COMMAND:-}
+      ISAAC_ARENA_COMMAND: ${ISAAC_ARENA_COMMAND:-}
+    volumes:
+      - ${ISAAC_ARTIFACT_DIR:-/var/lib/ghost-trials/artifacts}:/data/ghost-trials
+      - ${ROBOTICS_ROOT:-/opt/robotics}:/opt/robotics
+      - ${GHOST_HARNESS_ROOT:-/opt/ghost}:/opt/ghost:ro
+      - ${GR00T_MODEL_ROOT:-/opt/models}:/opt/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

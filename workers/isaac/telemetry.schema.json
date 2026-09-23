@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ghost Trials simulator telemetry sample",
+  "type": "object",
+  "required": ["timestamp_ms", "hazard_active", "clearance_m", "collision", "fall", "policy_reacted"],
+  "properties": {
+    "timestamp_ms": {"type": "number", "minimum": 0},
+    "hazard_active": {"type": "boolean"},
+    "clearance_m": {"type": ["number", "null"], "minimum": 0},
+    "collision": {"type": "boolean"},
+    "fall": {"type": "boolean"},
+    "policy_reacted": {"type": "boolean"},
+    "intervention": {"type": "boolean", "default": false},
+    "task_completed": {"type": "boolean"},
+    "simulator_version": {"type": "string"}
+  },
+  "additionalProperties": true
+}

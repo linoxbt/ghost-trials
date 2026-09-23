@@ -1,0 +1,12 @@
+.env
+deployment/private/
+artifacts/worker/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/state.json
+data/validation/
+data/experiments/
+artifacts/generated/
+artifacts/*.png
