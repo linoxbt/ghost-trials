@@ -188,3 +188,9 @@ uv run uvicorn ghost_trials.app:app --host 0.0.0.0 --port 8000
 ```
 
 Preflight must pass before recording the demo. Pin and record the Cosmos container digest, Arena/Isaac commit, GR00T commit, GEAR-SONIC commit, policy checkpoint digest, scenario seed, and generated artifact hashes for the final evidence chain.
+
+## Private deployment
+
+For the hardened API, persistent queue, access controls, backups and operations,
+follow [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). The provider setup above
+is necessary but is not sufficient for production promotion.

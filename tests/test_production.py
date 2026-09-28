@@ -94,12 +94,15 @@ async def test_isaac_worker_job_contract_requires_artifacts():
                 "fall_or_collision": False,
                 "simulation_video_url": "https://worker/video.mp4",
                 "trace_url": "https://worker/trace.jsonl",
+                "policy_checkpoint_digest": "sha256:test",
             }},
         })
 
     settings = Settings(
         isaac_job_endpoint="http://worker/",
         gr00t_checkpoint="/models/checkpoint",
+        isaac_job_token="worker-test-token",
+        gr00t_checkpoint_digest="sha256:test",
         isaac_poll_interval_seconds=0,
     )
     simulator = IsaacRemoteSimulator(settings, httpx.MockTransport(handler))

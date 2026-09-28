@@ -1,0 +1,14 @@
+{
+  "name": "ghost-trials-ui",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {"build:auth": "node scripts/build_auth.mjs"},
+  "dependencies": {
+    "@privy-io/react-auth": "3.45.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {"esbuild": "0.28.2"},
+  "overrides": {"ws": "8.21.0", "uuid": "11.1.1", "decode-uri-component": "0.5.0"}
+}

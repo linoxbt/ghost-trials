@@ -6,3 +6,10 @@
 artifacts
 data
 *.pyc
+deployment/private
+deployment/production.env
+netlify-dist
+.netlify
+*.sqlite3*
+node_modules
+static/auth

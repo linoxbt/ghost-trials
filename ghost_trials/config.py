@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     scenario_reasoner_model: str = "nvidia/nemotron-3-super-120b-a12b"
     cosmos_base_url: str | None = None
     cosmos_api_key: str | None = None
+    nvidia_api_key: str | None = None
     cosmos_api_style: str = "nim"
     cosmos_timeout_seconds: float = 1800
     cosmos_resolution: str = "480_16_9"
@@ -42,6 +44,33 @@ class Settings(BaseSettings):
     gr00t_policy_host: str = "127.0.0.1"
     gr00t_policy_port: int = 5550
     ghost_execution_backend: str = "gear_sonic_sim"
+    ghost_admin_token: str | None = None
+    ghost_operator_token: str | None = None
+    ghost_viewer_token: str | None = None
+    ghost_allowed_origins: str = ""
+    ghost_live_execution_enabled: bool = False
+    ghost_max_pending_jobs: int = Field(default=10, ge=1, le=1000)
+    ghost_max_jobs_per_day: int = Field(default=20, ge=1, le=10000)
+    ghost_max_requests_per_minute: int = Field(default=60, ge=1, le=10000)
+    ghost_job_timeout_seconds: float = Field(default=3900, ge=1, le=86400)
+    ghost_session_seconds: int = Field(default=3600, ge=60, le=86400)
+    ghost_cookie_secure: bool = True
+    ghost_model_max_tokens: int = Field(default=2048, ge=256, le=8192)
+    ghost_artifact_bucket: str | None = None
+    ghost_s3_endpoint: str | None = None
+    ghost_s3_region: str = "us-east-1"
+    privy_app_id: str | None = None
+    privy_client_id: str | None = None
+    privy_verification_key: str | None = None
+    ghost_customer_auth_required: bool = False
+    ghost_public_signup_enabled: bool = True
+    ghost_privy_session_seconds: int = Field(default=3600, ge=60, le=86400)
+    ghost_platform_budget_cents: int = Field(default=0, ge=0)
+    ghost_live_job_reservation_cents: int = Field(default=0, ge=0)
+    ghost_provider_spending_controls_confirmed: bool = False
+    ghost_physical_max_bundle_bytes: int = Field(default=268435456, ge=1048576, le=1073741824)
+    ghost_physical_disk_reserve_bytes: int = Field(default=1073741824, ge=10485760)
+    ghost_physical_max_chunks_per_minute: int = Field(default=240, ge=1, le=2000)
 
 
 @lru_cache

@@ -1,15 +1,21 @@
 # Ghost Trials
 
-Ghost Trials is an auditable simulation safety-evaluation workspace for robotics engineers. It organizes hazard scenarios, robot-policy trials, measured evidence, and model-assisted findings. Its results describe the tested conditions, not real-world safety certification.
+Ghost Trials is an **experimental robot-policy evaluation platform** for robotics engineers. It organizes hazard scenarios, trial recordings, telemetry, provenance, and model-assisted findings. It is not an established safety-certification service. Provider integrations are implemented, but a genuine end-to-end robot-policy trial has not yet been demonstrated in this deployment.
 
 This repository is the runnable product shell for the Nebius × NVIDIA Global AI Hackathon Physical AI track. It runs without GPU credentials using deterministic development adapters. Those adapters preserve the production contracts, so Cosmos generation and Isaac Lab-Arena jobs can replace them without changing the API or dashboard.
 
+## Hackathon submission
+
+The [Devpost submission package](docs/submission/README.md) contains the project overview, detailed [project story](docs/submission/PROJECT_STORY.md), field-by-field [organizer answers](docs/submission/ADDITIONAL_INFO.md), [demo script](docs/submission/DEMO_SCRIPT.md) and [evidence-status snapshot](docs/submission/EVIDENCE_STATUS.md). Personal details, numeric ratings, project-history confirmation and the public video URL require owner completion. The package distinguishes demonstrated model access from pending GPU/robot execution; it is not a submitted entry or proof of eligibility.
+
 ## Quick start
 
-Requirements: Python 3.11+ and `uv`.
+Requirements: Python 3.11+, Node 22+, npm, and `uv`.
 
 ```bash
 cp .env.example .env
+npm ci
+npm run build:auth
 uv sync --extra dev
 uv run uvicorn ghost_trials.app:app --reload
 ```
@@ -33,7 +39,7 @@ docker compose up --build
 - FastAPI API: `POST /scenarios`, `GET /trials`, `GET /trials/{id}`, `GET /safety-score`, and `WS /live`
 - Persistent, typed scenario and evaluation records
 - Seeded, replayable simulation metric adapter
-- Fixed safety rubric with evidence-citing causal reports
+- Versioned experimental rubric with evidence-aware incident reports, not demonstrated causal certification
 - Optional Nebius Token Factory / Nemotron judge with two-pass disagreement detection and Ultra escalation
 - Orange application interface with custom vector branding, collapsible sidebar, and accessible mobile hamburger navigation
 - Separate Overview, Trial Runs, Scenario Library, Create Trial, Reports, System, and flight-record views
@@ -41,7 +47,7 @@ docker compose up --build
 - Compare runs with setup compatibility checks, metric deltas, and linked recording controls
 - Evidence inspector with recorded incident timestamps, provenance, artifact manifests, and original judge interpretations
 - Benchmark coverage split by policy/checkpoint, simulator, rubric, embodiment, and evidence origin
-- Versioned score guardrails: insufficient evidence is excluded; collisions are not causal proof; incompatible cohorts are not pooled
+- Versioned score guardrails: synthetic, unverified, legacy, proxy-only, incomplete and uncertain evidence is excluded; collisions are not causal proof; eligible incompatible cohorts are not pooled
 - Exact saved-scenario replay against the configured policy, without regenerating the hazard
 - Opt-in bounded adaptive/random/grid experiment CLI and reference-label agreement audit
 
@@ -71,7 +77,7 @@ The pipeline defines three interfaces in `ghost_trials/adapters.py`:
 2. `Simulator` accepts that scenario and returns the stable `TrialMetrics` contract.
 3. `TrialJudge` returns category, confidence, reasoning, and model tier.
 
-Production implementations are included for Cosmos 3 Generator NIM/vLLM-Omni and the remote GPU job protocol. Store generated video, simulator recording, raw telemetry, judge inputs, and judge outputs under the trial ID. Production mode never silently falls back: it marks the trial `error` and retains partial evidence.
+Production implementations are included for hosted Cosmos video generation, NIM/vLLM-Omni paths and the remote GPU job protocol. Store generated video, simulator recording, raw telemetry, judge inputs, and judge outputs under the trial ID. Production mode never silently falls back: missing resources produce an explicit `blocked` record and stage failures produce `error`, retaining produced artifacts where available. Configuration is not proof that these integrations have executed successfully.
 
 The Isaac job should accept at minimum:
 
@@ -113,7 +119,11 @@ ScenarioGenerator ──► Simulator ──► TrialJudge ──► evidence re
  local adapter        seeded local  fixed rubric
 ```
 
-## Safety Score
+## Experimental evaluation score
+
+Synthetic demo records, unverified measurements, legacy rubrics, proxy-only measurements, incomplete artifacts, uncertain findings, and records without a live Nemotron review are excluded. A stored outcome or a configured provider is not execution proof. An unavailable score is `null`, not zero. Demo findings remain inspectable and prominently labeled. The legacy API field `/safety-score` remains for compatibility; it does not imply certification.
+
+`GET /trials/ID/reproducibility` exports scenario/configuration, checkpoint identity, execution recipe, raw trace and response-video references, hashes, verification results, original judge assessment, and measurement/replay limitations. Artifact references require authorization; this JSON does not embed the video. `GET /demonstration-readiness` reports the narrow recorded-trial milestone, never competition eligibility or hardware attestation.
 
 | Outcome | Weight |
 |---|---:|
@@ -134,3 +144,28 @@ For the hosted frontend and backend proxy configuration, see [Netlify deployment
 ## License
 
 MIT
+
+## Production hardening
+
+See [private deployment and readiness gates](docs/PRODUCTION_READINESS.md) for
+authentication, persistent jobs/evidence, backups, monitoring and deployment.
+This implementation supports individual Privy email/Google identities and
+organization-isolated workspaces in one API process. Team invitations, role
+changes, session revocation, tenant-filtered media/live updates, and atomic
+execution-admission budgets are implemented. See [account setup](docs/AUTHENTICATION.md).
+Real GPU execution and independent expert validation remain required before
+promotion; these are not demonstrated by synthetic previews or unit tests.
+
+## Physical robot recordings
+
+The dashboard includes **Physical recordings** at `/app/#/physical`. Prepare a
+private capture plan while hardware access is pending; unknown identity and
+weights remain blank. Once an on-site operator validates a compatible G1 29-DOF
+setup, the read-only observer can record camera video, DDS joint/IMU feedback,
+and commands from an externally running policy. The API provides resumable,
+hash-checked uploads, full video decoding, telemetry validation and explicit
+budget-gated Nemotron judging. It has no motor-control or hazardous-action routes.
+
+See [the physical robot handoff](docs/PHYSICAL_ROBOT.md). Hardware provenance is
+operator-declared, command-change timing remains a proxy, and real hardware
+testing/calibration and independent review have **not** been completed.

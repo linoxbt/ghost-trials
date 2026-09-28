@@ -27,6 +27,14 @@ HAZARDS = {
 }
 
 
+class ExecutionBlocked(RuntimeError):
+    """An operator-actionable dependency failure, never a synthetic fallback."""
+
+    def __init__(self, missing: list[str]):
+        self.missing = missing
+        super().__init__("Execution blocked: " + ", ".join(missing) + ". No robot metrics or safety finding were produced.")
+
+
 class ScenarioGenerator(ABC):
     @abstractmethod
     async def generate(self, scenario_id: str, prompt: str, severity: Severity | None, seed: int) -> Scenario:
@@ -158,6 +166,7 @@ class NebiusNemotronJudge(TrialJudge):
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.1,
+            "max_tokens": self.settings.ghost_model_max_tokens,
         }
         async with httpx.AsyncClient(base_url=self.settings.nebius_base_url, timeout=90) as client:
             response = await client.post(

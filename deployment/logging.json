@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {"service": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
+  "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "service", "stream": "ext://sys.stdout"}},
+  "root": {"handlers": ["console"], "level": "INFO"},
+  "loggers": {"httpx": {"level": "WARNING"}, "httpcore": {"level": "WARNING"}}
+}

@@ -26,7 +26,7 @@ const origin=(process.env.GHOST_PREVIEW_URL||'http://127.0.0.1:8010').replace(/\
   await page.getByRole('heading',{name:'Incident timeline'}).waitFor();
   await page.getByText('No timestamped telemetry events were captured for this record.',{exact:false}).waitFor();
   const evidenceDownload=page.waitForEvent('download');await page.getByRole('button',{name:'Export evidence assessment'}).click();
-  assert.match((await evidenceDownload).suggestedFilename(),/-evidence.json$/);
+  assert.match((await evidenceDownload).suggestedFilename(),/-reproducibility.json$/);
   if((await (await page.request.get(origin+'/health')).json()).mode==='local'){
    const originalId=records[0].trial_id;
    await page.getByRole('button',{name:'Replay demo scenario'}).click();
