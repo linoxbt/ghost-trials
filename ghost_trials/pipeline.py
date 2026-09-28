@@ -1,10 +1,11 @@
 import asyncio
 import random
 import uuid
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
-from .adapters import ScenarioGenerator, Simulator, TrialJudge
+from .adapters import ExecutionBlocked, ScenarioGenerator, Simulator, TrialJudge
 from .models import LiveEvent, Scenario, ScenarioCreate, Severity, StructuredDescription, Trial, TrialStatus
 from .store import TrialStore
 from .evaluation import RUBRIC_VERSION, guard_judgment
@@ -35,7 +36,7 @@ class CertificationPipeline:
         self.policy_name = policy_name
         self._run_lock = asyncio.Lock()
 
-    async def create(self, request: ScenarioCreate):
+    async def create(self, request: ScenarioCreate, *, persist=True):
         suffix = uuid.uuid4().hex[:12]
         scenario_id, trial_id = f"scn_{suffix}", f"trl_{suffix}"
         seed = request.seed if request.seed is not None else random.SystemRandom().randrange(2_147_483_647)
@@ -49,52 +50,99 @@ class CertificationPipeline:
         )
         trial = Trial(trial_id=trial_id, scenario_id=scenario_id, embodiment=self.embodiment,
                       policy_name=self.policy_name, rubric_version=RUBRIC_VERSION)
-        await self.store.put_scenario(scenario)
-        await self.store.put_trial(trial)
+        if persist:
+            await self.store.put_scenario(scenario)
+            await self.store.put_trial(trial)
         return scenario, trial
 
     async def run(self, trial_id: str) -> None:
         async with self._run_lock:
             await self._run(trial_id)
 
-    async def replay(self, original: Trial):
-        if original.status != TrialStatus.DONE:
-            raise ValueError("Only a completed trial can be replayed")
+    async def replay(self, original: Trial, *, persist=True):
+        if original.execution_mode == "physical":
+            raise ValueError("A physical replay requires a new on-site recording; this server cannot actuate a robot")
+        if original.status not in {TrialStatus.DONE, TrialStatus.BLOCKED}:
+            raise ValueError("Only a completed or blocked trial can be replayed")
         scenario = self.store.scenarios[original.scenario_id]
+        if scenario.structured_description.hazard_type == "pending_generation":
+            raise ValueError("Scenario generation must finish before reusing a scenario")
         trial = Trial(trial_id=f"trl_{uuid.uuid4().hex[:12]}", scenario_id=scenario.scenario_id,
+                      organization_id=original.organization_id,
                       embodiment=self.embodiment, policy_name=self.policy_name,
                       rubric_version=RUBRIC_VERSION, replay_of=original.trial_id)
-        await self.store.put_trial(trial)
+        if persist:
+            await self.store.put_trial(trial)
         return scenario, trial
 
     async def _run(self, trial_id: str) -> None:
         trial = self.store.trials[trial_id]
         scenario = self.store.scenarios[trial.scenario_id]
         try:
+            if trial.execution_mode == "physical":
+                from .physical import RecordingSetup, verify_recording
+                import json
+                with self.store.connect() as db:
+                    row = db.execute("SELECT payload FROM records WHERE kind='physical_session' AND id=?",
+                                     (trial.physical_session_id,)).fetchone()
+                session = json.loads(row[0]) if row else None
+                if (not session or session["status"] != "validated"
+                        or session["organization_id"] != trial.organization_id or session["trial_id"] != trial.trial_id):
+                    raise ExecutionBlocked(["Validated, organization-owned physical recording"])
+                root = self.physical_settings.ghost_artifact_root / "physical" / trial.physical_session_id
+                metrics, verification = await asyncio.to_thread(verify_recording, root,
+                    RecordingSetup.model_validate(session["setup"]), session["manifest"])
+                metrics.simulation_video_url = trial.metrics.simulation_video_url
+                metrics.trace_url = trial.metrics.trace_url
+                trial.metrics = metrics
+                trial.evidence_verification = verification
+                await self._score(trial, scenario)
+                return
             if not trial.replay_of:
                 await self._status(trial, TrialStatus.GENERATING, "Generating scenario and video")
                 scenario = await self.generator.generate(
                     scenario.scenario_id, scenario.prompt, scenario.requested_severity, scenario.seed
                 )
+                scenario.organization_id = trial.organization_id
                 await self.store.put_scenario(scenario)
             await asyncio.sleep(self.delay)
             await self._status(trial, TrialStatus.SIMULATING, "Running robot policy trial")
-            trial.metrics = await self.simulator.run(scenario)
+            measured = await self.simulator.run(scenario)
+            if getattr(self, "require_robot_evidence", False) and measured.evidence_origin != "simulator":
+                raise ExecutionBlocked(["Verified robot-policy telemetry; synthetic metrics are prohibited in live mode"])
+            if getattr(self, "evidence_repository", None) is not None:
+                candidate = trial.model_copy(update={"metrics": measured})
+                verification = await self.evidence_repository.capture(candidate, scenario, self.simulator.last_result)
+                measured = candidate.metrics
+                trial.evidence_verification = verification
+            trial.metrics = measured
             await self.store.put_trial(trial)
-            await asyncio.sleep(self.delay)
-            await self._status(trial, TrialStatus.SCORING, "Safety judge is reviewing telemetry")
-            result = await self.judge.judge(scenario, trial.metrics)
-            trial.judge_assessment = result
-            result = guard_judgment(trial, scenario, result)
-            trial.score_category = result.score_category
-            trial.confidence = result.confidence
-            trial.tier_used = result.tier_used
-            trial.reasoning_trace = result.reasoning_trace
-            trial.completed_at = datetime.now(timezone.utc)
-            await self._status(trial, TrialStatus.DONE, "Evaluation record saved; review evidence and limitations")
+            await self._score(trial, scenario)
+        except ExecutionBlocked as exc:
+            trial.metrics = None
+            trial.error = str(exc)
+            await self._status(trial, TrialStatus.BLOCKED, trial.error)
         except Exception as exc:
-            trial.error = str(exc) or type(exc).__name__
+            if trial.status == TrialStatus.SIMULATING or (trial.execution_mode == "physical" and trial.status != TrialStatus.SCORING):
+                # An invalid/unretained worker response is not measured evidence.
+                trial.metrics = None
+            if getattr(self, "redact_errors", False):
+                logging.getLogger(__name__).error("pipeline_failed trial_id=%s error_type=%s", trial_id, type(exc).__name__)
+                trial.error = "Pipeline stage failed; contact the operator with this trial ID."
+            else:
+                trial.error = str(exc) or type(exc).__name__
             await self._status(trial, TrialStatus.ERROR, "Trial pipeline failed")
+
+    async def _score(self, trial, scenario):
+        await asyncio.sleep(self.delay)
+        await self._status(trial, TrialStatus.SCORING, "Safety judge is reviewing recorded telemetry")
+        result = await self.judge.judge(scenario, trial.metrics)
+        trial.judge_assessment = result
+        result = guard_judgment(trial, scenario, result)
+        trial.score_category, trial.confidence = result.score_category, result.confidence
+        trial.tier_used, trial.reasoning_trace = result.tier_used, result.reasoning_trace
+        trial.completed_at = datetime.now(timezone.utc)
+        await self._status(trial, TrialStatus.DONE, "Evaluation record saved; review evidence and limitations")
 
     async def _status(self, trial: Trial, status: TrialStatus, message: str) -> None:
         trial.status = status

@@ -20,6 +20,8 @@ async def test_api_accepts_and_completes_trial(tmp_path):
             assert (await client.get("/assets/app.css")).status_code == 200
             assert (await client.get("/assets/app.js")).status_code == 200
             assert (await client.get("/assets/production.css")).status_code == 200
+            preview = await client.get(f"/artifacts/{next(iter(store.scenarios))}/preview")
+            assert preview.headers["x-frame-options"] == "SAMEORIGIN"
 
             response = await client.post(
                 "/scenarios",
@@ -42,7 +44,10 @@ async def test_api_accepts_and_completes_trial(tmp_path):
             assert detail.json()["metrics"]["time_to_react_ms"] > 0
             summary = (await client.get("/safety-score")).json()
             assert summary["n_trials"] == 7
-            assert 0 <= summary["safety_score"] <= 1
+            assert summary["score_available"] is False
+            assert summary["safety_score"] is None
+            assert summary["scored_trials"] == 0
+            assert summary["excluded_trials"] == 7
 
 
 @pytest.mark.asyncio

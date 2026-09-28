@@ -1,0 +1,37 @@
+name: Verify Ghost Trials
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHOST_MODE: local
+      GHOST_PIPELINE_DELAY_SECONDS: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install recording-validation tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:auth
+      - run: npm audit --omit=dev --audit-level=high
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.21"
+      - run: uv sync --frozen --extra dev --extra physics --extra models --extra storage
+      - run: uv run --frozen pytest -q
+      - run: git diff --check
+      - run: GHOST_BACKEND_ORIGIN=https://backend.example.com uv run --frozen python scripts/build_netlify.py
+      - run: docker build -t ghost-trials:ci .
+      - run: docker run --rm --network none --read-only --tmpfs /data:uid=10001,gid=10001,mode=700 --tmpfs /tmp -v "$PWD/scripts/smoke_secure_api.py:/smoke.py:ro" ghost-trials:ci python /smoke.py

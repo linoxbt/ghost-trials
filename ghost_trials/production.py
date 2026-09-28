@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from .adapters import ScenarioGenerator, Simulator
+from .adapters import ExecutionBlocked, ScenarioGenerator, Simulator
 from .config import Settings
 from .models import Scenario, Severity, StructuredDescription, TrialMetrics
 from workers.isaac.hazards import compile_hazard
@@ -35,6 +35,7 @@ def _assert_mp4(payload: bytes) -> None:
 
 class OpenAICompatibleScenarioReasoner:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        self.settings = settings
         key = settings.scenario_reasoner_api_key or settings.nebius_api_key
         if not key:
             raise ProductionConfigurationError("SCENARIO_REASONER_API_KEY or NEBIUS_API_KEY is required")
@@ -53,6 +54,7 @@ class OpenAICompatibleScenarioReasoner:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.1,
+            "max_tokens": self.settings.ghost_model_max_tokens,
         }
         async with httpx.AsyncClient(base_url=self.base_url, timeout=90, transport=self.transport) as client:
             response = await client.post("chat/completions", headers=_auth_headers(self.key), json=request)
@@ -65,39 +67,48 @@ class OpenAICompatibleScenarioReasoner:
 
 
 class CosmosVideoClient:
-    """Client for the official Cosmos3 Generator NIM or vLLM-Omni video API."""
+    """Official hosted NVIDIA Cosmos3, deployed NIM, or vLLM-Omni API."""
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
-        if not settings.cosmos_base_url:
+        if not settings.cosmos_base_url and settings.cosmos_api_style != "nvidia_catalog":
             raise ProductionConfigurationError("COSMOS_BASE_URL is required")
-        if settings.cosmos_api_style not in {"nim", "vllm"}:
-            raise ProductionConfigurationError("COSMOS_API_STYLE must be 'nim' or 'vllm'")
+        if settings.cosmos_api_style not in {"nim", "vllm", "nvidia_catalog"}:
+            raise ProductionConfigurationError("COSMOS_API_STYLE must be 'nim', 'vllm', or 'nvidia_catalog'")
+        if settings.cosmos_api_style == "nvidia_catalog" and not (settings.cosmos_api_key or settings.nvidia_api_key):
+            raise ExecutionBlocked(["NVIDIA_API_KEY (Cosmos access)"])
         if (settings.cosmos_num_frames - 1) % 4:
             raise ProductionConfigurationError("COSMOS_NUM_FRAMES must follow the 4k+1 cadence")
         self.settings = settings
         self.transport = transport
+        self.base_url = (settings.cosmos_base_url or "https://ai.api.nvidia.com/").rstrip("/") + "/"
 
     async def generate(self, prompt: str, seed: int) -> bytes:
-        headers = _auth_headers(self.settings.cosmos_api_key)
+        headers = _auth_headers(self.settings.cosmos_api_key or self.settings.nvidia_api_key)
         timeout = self.settings.cosmos_timeout_seconds
         async with httpx.AsyncClient(
-            base_url=self.settings.cosmos_base_url,
+            base_url=self.base_url,
             timeout=timeout,
             transport=self.transport,
         ) as client:
-            if self.settings.cosmos_api_style == "nim":
+            if self.settings.cosmos_api_style in {"nim", "nvidia_catalog"}:
+                hosted = self.settings.cosmos_api_style == "nvidia_catalog"
+                body = {
+                    "prompt": prompt, "seed": seed,
+                    "resolution": self.settings.cosmos_resolution,
+                    "fps": self.settings.cosmos_fps,
+                }
+                body.update({
+                    "model_mode": "text2video", "num_frames": self.settings.cosmos_num_frames,
+                    "num_inference_steps": self.settings.cosmos_steps,
+                } if hosted else {
+                    "guidance_scale": self.settings.cosmos_guidance_scale,
+                    "steps": self.settings.cosmos_steps,
+                    "num_output_frames": self.settings.cosmos_num_frames,
+                })
                 response = await client.post(
-                    "v1/infer",
+                    "v1/cosmos/nvidia/cosmos3-nano" if hosted else "v1/infer",
                     headers={**headers, "Accept": "application/json"},
-                    json={
-                        "prompt": prompt,
-                        "seed": seed,
-                        "guidance_scale": self.settings.cosmos_guidance_scale,
-                        "steps": self.settings.cosmos_steps,
-                        "resolution": self.settings.cosmos_resolution,
-                        "num_output_frames": self.settings.cosmos_num_frames,
-                        "fps": self.settings.cosmos_fps,
-                    },
+                    json=body,
                 )
                 response.raise_for_status()
                 payload = response.json()
@@ -135,6 +146,9 @@ class CosmosVideoClient:
         return video
 
     async def ready(self) -> bool:
+        if self.settings.cosmos_api_style == "nvidia_catalog":
+            # No documented readiness endpoint: credentials are not proof of access.
+            return False
         path = "v1/health/ready" if self.settings.cosmos_api_style == "nim" else "health"
         try:
             async with httpx.AsyncClient(base_url=self.settings.cosmos_base_url, timeout=10) as client:
@@ -151,11 +165,15 @@ class CosmosScenarioGenerator(ScenarioGenerator):
         video_client: CosmosVideoClient | None = None,
     ):
         self.settings = settings
-        self.reasoner = reasoner or OpenAICompatibleScenarioReasoner(settings)
-        self.video_client = video_client or CosmosVideoClient(settings)
+        self.reasoner = reasoner
+        self.video_client = video_client
         self.root = settings.ghost_artifact_root
 
     async def generate(self, scenario_id: str, prompt: str, severity: Severity | None, seed: int) -> Scenario:
+        # Allow the dashboard to start with missing credentials, but fail closed
+        # before making any paid scenario-reasoner call.
+        self.video_client = self.video_client or CosmosVideoClient(self.settings)
+        self.reasoner = self.reasoner or OpenAICompatibleScenarioReasoner(self.settings)
         description = await self.reasoner.expand(prompt, severity)
         recipe = compile_hazard({
             "structured_description": description.model_dump(mode="json"),
@@ -183,6 +201,14 @@ class CosmosScenarioGenerator(ScenarioGenerator):
             severity_tag=description.severity,
             seed=seed,
             execution_recipe=recipe,
+            generation_provenance={
+                "provider": "cosmos", "api_style": self.settings.cosmos_api_style,
+                "model": "cosmos3-nano" if self.settings.cosmos_api_style == "nvidia_catalog" else "deployment-configured",
+                "sha256": digest, "seed": seed,
+                "num_frames": self.settings.cosmos_num_frames,
+                "fps": self.settings.cosmos_fps,
+                "is_robot_execution_evidence": False,
+            },
         )
 
 
@@ -190,14 +216,18 @@ class IsaacRemoteSimulator(Simulator):
     """Submits a trial to a GPU worker running Isaac Lab-Arena and a GR00T policy server."""
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
-        if not settings.isaac_job_endpoint:
-            raise ProductionConfigurationError("ISAAC_JOB_ENDPOINT is required")
-        if not settings.gr00t_checkpoint:
-            raise ProductionConfigurationError("GR00T_CHECKPOINT is required and must be fine-tuned for the selected backend")
         self.settings = settings
         self.transport = transport
 
     async def run(self, scenario: Scenario) -> TrialMetrics:
+        missing = [name for name, value in {
+            "ISAAC_JOB_ENDPOINT (GPU policy worker)": self.settings.isaac_job_endpoint,
+            "ISAAC_JOB_TOKEN": self.settings.isaac_job_token,
+            "GR00T_CHECKPOINT (compatible fine-tuned weights)": self.settings.gr00t_checkpoint,
+            "GR00T_CHECKPOINT_DIGEST": self.settings.gr00t_checkpoint_digest,
+        }.items() if not value]
+        if missing:
+            raise ExecutionBlocked(missing)
         request = {
             "scenario": scenario.model_dump(mode="json"),
             "execution_backend": self.settings.ghost_execution_backend,

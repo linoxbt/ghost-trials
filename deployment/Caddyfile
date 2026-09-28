@@ -1,0 +1,18 @@
+{
+    email {$ACME_EMAIL}
+}
+{$GHOST_DOMAIN} {
+    request_body {
+        max_size 16KB
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+    }
+    @preview path /artifacts/*
+    header @preview X-Frame-Options "SAMEORIGIN"
+    @notPreview not path /artifacts/*
+    header @notPreview X-Frame-Options "DENY"
+    reverse_proxy dashboard:8000
+}

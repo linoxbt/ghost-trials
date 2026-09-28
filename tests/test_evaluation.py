@@ -6,7 +6,8 @@ import pytest
 from ghost_trials.adapters import LocalRubricJudge, LocalScenarioGenerator
 from ghost_trials.evaluation import (
     RUBRIC_VERSION, benchmark_report, compare_trials, evidence_report,
-    grouped_summary, guard_judgment, scenario_digest, summarize,
+    grouped_summary, guard_judgment, scenario_digest, summarize, evidence_class,
+    demonstration_readiness, reproducibility_report,
 )
 from ghost_trials.models import EvidenceEvent, JudgeResult, ScoreCategory, Trial, TrialMetrics, TrialStatus
 from workers.isaac.trial_runner import derive_metrics
@@ -28,7 +29,10 @@ def recorded_trial(identifier="trl_a", **updates):
                            events=[EvidenceEvent(kind="hazard_onset", timestamp_ms=3000, description="fixture")])
     metrics = metrics.model_copy(update=updates)
     return Trial(trial_id=identifier, scenario_id="scn_eval", status="done", metrics=metrics,
-                 rubric_version=RUBRIC_VERSION, score_category="avoided", confidence=.9)
+                 rubric_version=RUBRIC_VERSION, score_category="avoided", confidence=.9,
+                 tier_used="nvidia/nemotron-fixture", evidence_verification={
+                     "status": "integrity_and_metric_checks_passed", "video_decoded": True,
+                     "checkpoint_digest": metrics.policy_checkpoint_digest})
 
 
 def judgment(category="avoided", confidence=.9):
@@ -74,6 +78,52 @@ def test_summary_excludes_insufficient_and_groups_distinct_policies():
     assert len(grouped_summary([a, b])) == 1
     b.rubric_version = "legacy-unversioned"
     assert len(grouped_summary([a, b])) == 2
+
+
+@pytest.mark.parametrize("change", ["synthetic", "unknown", "proxy", "legacy", "no_validation", "no_decode", "no_judge"])
+def test_stored_success_never_promotes_demo_or_unverified_measurements(change):
+    trial = recorded_trial()
+    if change in {"synthetic", "unknown"}:
+        trial.metrics.evidence_origin = change
+    elif change == "proxy":
+        trial.metrics.measurements_are_proxies = True
+    elif change == "legacy":
+        trial.rubric_version = "legacy-unversioned"
+    elif change == "no_validation":
+        trial.evidence_verification = None
+    elif change == "no_decode":
+        trial.evidence_verification["video_decoded"] = False
+    else:
+        trial.tier_used = "deterministic-rubric-v1"
+    result = summarize([trial])
+    assert result["scored_trials"] == 0 and result["excluded_trials"] == 1
+    assert result["safety_score"] is None and result["exclusion_reasons"]
+    assert trial.score_category == ScoreCategory.AVOIDED  # Historical finding is preserved.
+
+
+def test_provider_origin_without_validation_cannot_complete_demo_milestone():
+    trial = recorded_trial()
+    trial.evidence_verification = None
+    assert evidence_class(trial) == "unverified"
+    assert demonstration_readiness([trial])["status"] == "pending_real_execution"
+    trial.evidence_verification = {"status": "integrity_and_metric_checks_passed",
+                                  "video_decoded": True, "checkpoint_digest": "a" * 64}
+    report = demonstration_readiness([trial])
+    assert report["trial_ids"] == [trial.trial_id]
+    assert report["certification"] is False and report["execution_attested"] is False
+
+
+@pytest.mark.asyncio
+async def test_reproducibility_contains_saved_setup_and_limits(scenario):
+    trial = recorded_trial()
+    report = reproducibility_report(trial, scenario)
+    assert report["configuration"]["checkpoint_digest"] == "a" * 64
+    assert report["configuration"]["seed"] == 42
+    assert report["artifacts"]["raw_trace"] == "/fixture.jsonl"
+    assert report["artifacts"]["response_video"] == "/fixture.mp4"
+    assert report["replay"]["guarantees_bitwise_determinism"] is False
+    assert report["evidence"]["verification"]["video_decoded"] is True
+    assert report["certification"] is False and report["limitations"]
 
 
 @pytest.mark.asyncio
@@ -138,14 +188,14 @@ async def test_read_only_evaluation_endpoints(scenario, monkeypatch):
         assert (await client.get("/comparisons?baseline=trl_a&candidate=missing")).status_code == 404
         assert len((await client.get("/benchmarks")).json()["groups"]) == 2
         summary = (await client.get("/safety-score")).json()
-        assert summary["score_available"] is False and summary["safety_score"] == 0
+        assert summary["score_available"] is False and summary["safety_score"] is None
         assert len(store.trials) == 2  # Viewing evidence never launches a trial.
 
 
 @pytest.mark.asyncio
 async def test_replay_endpoint_preserves_recipe_and_reports_bad_requests(scenario, monkeypatch, tmp_path):
     import asyncio
-    from ghost_trials.app import app, pipeline, store
+    from ghost_trials.app import app, pipeline, store, runner
     original = recorded_trial()
     monkeypatch.setattr(store, "path", tmp_path / "replay-state.json")
     monkeypatch.setattr(store, "trials", {original.trial_id: original})
@@ -159,10 +209,15 @@ async def test_replay_endpoint_preserves_recipe_and_reports_bad_requests(scenari
         response = await client.post("/trials/trl_a/replay")
         assert response.status_code == 202
         replay_id = response.json()["trial"]["trial_id"]
-        for _ in range(30):
-            await asyncio.sleep(.01)
-            if store.trials[replay_id].status in {"done", "error"}:
-                break
+        assert store.job(replay_id)["state"] == "queued"
+        runner.start()
+        try:
+            for _ in range(30):
+                await asyncio.sleep(.01)
+                if store.trials[replay_id].status in {"done", "error"}:
+                    break
+        finally:
+            await runner.stop()
         assert store.trials[replay_id].status == "done"
         assert store.trials[replay_id].replay_of == "trl_a"
         assert store.trials[replay_id].scenario_id == scenario.scenario_id

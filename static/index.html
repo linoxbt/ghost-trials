@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#191b1e">
   <title>Overview · Ghost Trials</title>
-  <meta name="description" content="The safety evaluation workspace for physical AI. Review robot trials, create hazards, and inspect the evidence.">
+  <meta name="description" content="An experimental evaluation platform for physical AI. Review trial evidence and its limitations; not a safety-certification service.">
   <link rel="icon" type="image/svg+xml" href="/assets/ghost-mark.svg">
   <link rel="stylesheet" href="/assets/workspace.css">
-  <link rel="stylesheet" href="/assets/evaluation.css">
+  <link rel="stylesheet" href="/assets/evaluation.css?v=evidence-v2">
+  <link rel="stylesheet" href="/assets/physical.css">
 </head>
 <body>
   <a class="skip-link" href="#content">Skip to workspace</a>
@@ -19,7 +20,7 @@
     <div class="nav-label">WORKSPACE</div>
     <nav id="navigation"></nav>
     <a class="sidebar-create" href="#/new"><span>+</span> Create a trial</a>
-    <div class="sidebar-resources"><a href="/">← Platform home</a><a href="/docs">Documentation ↗</a></div>
+    <div class="sidebar-resources"><a href="/">← Platform home</a><a href="/docs">Documentation ↗</a><button id="sessionLogout" class="button small" type="button" hidden>Sign out</button></div>
     <div class="sidebar-bottom"><div class="node-status"><span class="status-dot"></span><span id="sidebarMode">Connecting to workspace…</span></div><p>Evidence for a safer<br>physical world.</p><div class="sidebar-footer">NEBIUS × NVIDIA <span>v0.2</span></div></div>
   </aside>
   <div class="app-shell" id="appShell">
@@ -27,10 +28,12 @@
     <div id="environmentNotice" class="environment-notice" hidden></div>
     <div id="errorBanner" class="error-banner" role="alert" hidden></div>
     <main id="content" tabindex="-1"><div class="loading-state">Loading your evaluation workspace…</div></main>
-    <footer class="workspace-footer"><span>GHOST TRIALS <span class="footer-divider">/</span> Safety evaluation workspace</span><span id="lastUpdated">Awaiting data</span></footer>
+    <footer class="workspace-footer"><span>GHOST TRIALS <span class="footer-divider">/</span> Experimental evaluation platform</span><span id="lastUpdated">Awaiting data</span></footer>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
-  <script src="/assets/evaluation.js" defer></script>
-  <script src="/assets/workspace.js" defer></script>
+  <script src="/assets/evaluation.js?v=evidence-v2" defer></script>
+  <script src="/assets/team.js" defer></script>
+  <script src="/assets/physical.js?v=physical-v1" defer></script>
+  <script src="/assets/workspace.js?v=evidence-v2" defer></script>
 </body>
 </html>

@@ -1,0 +1,54 @@
+name: Deploy verified frontend
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: netlify-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GHOST_MODE: local
+      GHOST_PIPELINE_DELAY_SECONDS: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install recording-validation tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.21"
+      - run: uv sync --frozen --extra dev --extra physics --extra models --extra storage
+      - run: uv run --frozen pytest -q
+  frontend:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      GHOST_BACKEND_ORIGIN: ${{ vars.GHOST_BACKEND_ORIGIN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:auth
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Build and check backend
+        run: |
+          python scripts/build_netlify.py
+          curl --fail --retry 3 "$GHOST_BACKEND_ORIGIN/health"
+      - name: Deploy
+        run: npx --yes netlify-cli@23.6.0 deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"

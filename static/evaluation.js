@@ -40,7 +40,7 @@ function benchmarkPage(){return heading('Benchmark coverage','Know what was test
 async function loadBenchmark(){
  const node=$('#benchmarkResult');if(!node)return;
  try{const report=await json('/benchmarks');if(!node.isConnected)return;
-  node.innerHTML=`<div class="heading-actions benchmark-actions"><button class="button" id="exportBenchmark">Export benchmark</button><a class="button" href="/docs#evaluation">Evaluation methodology ↗</a></div><div class="benchmark-grid">${report.coverage.map(c=>`<article class="panel coverage-card"><div class="panel-header"><div><span class="eyebrow">${escapeHtml(c.severity)} SEVERITY</span><h2>${escapeHtml(human(c.hazard_type))}</h2></div><span class="badge">${escapeHtml(c.origin)}</span></div><dl class="coverage-metrics">${[['Completed',c.n_trials],['Unique seeds',c.unique_seeds],['Falls / collisions',c.fall_or_collision_count],['Tasks completed',c.task_completion_count],['Insufficient evidence',c.excluded_trials],['Execution errors',c.error_count]].map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl><div class="panel-foot"><span>${escapeHtml(c.policy_name)}<br><code>${escapeHtml(c.checkpoint_digest||'No checkpoint recorded')}</code><br>${escapeHtml(c.rubric_version)} · ${escapeHtml(c.simulator_version||'Unknown simulator')}</span></div></article>`).join('')||empty('No benchmark evidence yet','Run evaluations before drawing conclusions about coverage.')}</div><section class="panel coverage-scope"><div class="panel-header"><h2>Execution scope</h2></div><p class="finding">Implemented runner recipes: ${report.supported_execution_hazards.map(s=>escapeHtml(human(s))).join(', ')}. GPU validation remains necessary. Reduced traction is implemented only in the SONIC/MuJoCo backend, not Isaac Arena.</p><p class="finding">${report.limitations.map(escapeHtml).join(' ')}</p></section>`;
+  node.innerHTML=`<div class="heading-actions benchmark-actions"><button class="button" id="exportBenchmark">Export benchmark</button><a class="button" href="/docs#evaluation">Evaluation methodology ↗</a></div><div class="benchmark-grid">${report.coverage.map(c=>`<article class="panel coverage-card"><div class="panel-header"><div><span class="eyebrow">${escapeHtml(c.severity)} SEVERITY</span><h2>${escapeHtml(human(c.hazard_type))}</h2></div><span class="badge">${escapeHtml(c.origin)}</span></div><dl class="coverage-metrics">${[['Completed',c.n_trials],['Unique seeds',c.unique_seeds],['Falls / collisions',c.fall_or_collision_count],['Tasks completed',c.task_completion_count],['Excluded from score',c.excluded_trials],['Execution errors',c.error_count]].map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl><div class="panel-foot"><span>${escapeHtml(c.policy_name)}<br><code>${escapeHtml(c.checkpoint_digest||'No checkpoint recorded')}</code><br>${escapeHtml(c.rubric_version)} · ${escapeHtml(c.simulator_version||'Unknown simulator')}</span></div></article>`).join('')||empty('No benchmark evidence yet','Run evaluations before drawing conclusions about coverage.')}</div><section class="panel coverage-scope"><div class="panel-header"><h2>Execution scope</h2></div><p class="finding">Implemented runner recipes: ${report.supported_execution_hazards.map(s=>escapeHtml(human(s))).join(', ')}. GPU validation remains necessary. Reduced traction is implemented only in the SONIC/MuJoCo backend, not Isaac Arena.</p><p class="finding">${report.limitations.map(escapeHtml).join(' ')}</p></section>`;
   $('#exportBenchmark').onclick=()=>download(report,'ghost-trials-benchmark.json');
  }catch(error){if(node.isConnected)node.textContent=error.message;}
 }
@@ -51,8 +51,8 @@ async function mountEvidence(id){
  node.innerHTML='<div class="panel-header"><h2>Evidence inspector</h2><span class="chip">Loading</span></div>';
  $('#content').append(node);
  const action=document.createElement('a');action.className='button';action.href=`#/compare?baseline=${encodeURIComponent(id)}`;action.textContent='Compare run';$('#content .heading-actions')?.append(action);
- if(t.status==='done'){
-  const replay=document.createElement('button');replay.className='button';replay.textContent=local()?'Replay demo scenario':'Replay with configured policy';
+ if(t.execution_mode!=='physical'&&(t.status==='done'||(t.status==='blocked'&&t.scenario.structured_description.hazard_type!=='pending_generation'))){
+  const replay=document.createElement('button');replay.className='button';replay.textContent=t.status==='blocked'?'Run saved scenario after worker setup':local()?'Replay demo scenario':'Replay with configured policy';
   replay.onclick=async()=>{
    if(!local()&&!confirm('This executes the configured robot policy and judge against the saved scenario. Provider charges may apply. Continue?'))return;
    replay.disabled=true;
@@ -62,30 +62,51 @@ async function mountEvidence(id){
   $('#content .heading-actions')?.append(replay);
  }
  try{const report=await json(`/trials/${encodeURIComponent(id)}/evidence`);if(!node.isConnected)return;
-  node.innerHTML=`<div class="panel-header"><div><h2>Evidence inspector</h2><p>Measured checks and model interpretation are separate.</p></div><span class="badge ${report.evidence_status==='insufficient_evidence'?'insufficient_evidence':''}">${escapeHtml(human(report.evidence_status))}</span></div><p class="finding">${report.origin==='synthetic'?'This is a synthetic development record. No robot executed this trial. ':''}${report.missing_evidence.length?`Missing evidence: ${report.missing_evidence.map(s=>escapeHtml(human(s))).join(', ')}.`:'Recorded simulation artifacts are present; this is not an independent validation.'}</p>
+  node.innerHTML=`<div class="panel-header"><div><h2>Evidence inspector</h2><p>Measured checks and model interpretation are separate.</p></div><span class="badge ${report.evidence_status==='insufficient_evidence'?'insufficient_evidence':''}">${escapeHtml(human(report.evidence_status))}</span></div><p class="finding">${report.origin==='synthetic'?'This is a synthetic development record. No robot executed this trial. ':''}${report.missing_evidence.length?`Missing evidence: ${report.missing_evidence.map(s=>escapeHtml(human(s))).join(', ')}.`:'Artifacts are present; validation and provenance limits remain explicit below.'}</p>
   <div class="evidence-checks">${report.checks.map(c=>`<div><span>${escapeHtml(human(c.name))}</span><strong>${escapeHtml(valueText(c.observed))}</strong><span class="badge ${c.status==='fail'?'failed':c.status==='unknown'?'insufficient_evidence':'avoided'}">${c.status==='pass'?'Within threshold':c.status==='fail'?'Outside threshold':'Unknown'}</span></div>`).join('')}</div>
   <div class="panel-header"><h2>Incident timeline</h2><span class="chip">Recorded timestamps only</span></div>
   ${report.events.length?`<ol class="incident-timeline">${report.events.map(e=>`<li><button class="button small" data-seek-ms="${e.timestamp_ms}" ${t.metrics?.simulation_video_url?'':'disabled'}>${(e.timestamp_ms/1000).toFixed(3)} s</button><div><strong>${escapeHtml(human(e.kind))}</strong><p>${escapeHtml(e.description)}</p></div></li>`).join('')}</ol>`:'<p class="finding">No timestamped telemetry events were captured for this record. Timeline events are not inferred from a narrative or invented for demo data.</p>'}
   <dl class="metadata"><div><dt>Recorded rubric</dt><dd><code>${escapeHtml(report.rubric_version)}</code></dd></div><div><dt>Inspection rubric</dt><dd><code>${escapeHtml(report.checks_rubric_version)}</code></dd></div><div><dt>Scenario SHA-256</dt><dd><code>${escapeHtml(report.scenario_digest)}</code></dd></div><div><dt>Reaction target</dt><dd>${report.thresholds.reaction_ms} ms</dd></div><div><dt>Clearance target</dt><dd>${report.thresholds.clearance_m==null?'Not applicable':`${report.thresholds.clearance_m} m`}</dd></div>${report.thresholds.max_contact_slip_speed_m_s!=null?`<div><dt>Contact slip target</dt><dd>${report.thresholds.max_contact_slip_speed_m_s} m/s</dd></div>`:''}</dl>
   ${report.judge_interpretation?`<details class="raw-interpretation"><summary>Original judge interpretation (before evidence guardrails)</summary><p>${escapeHtml(report.judge_interpretation.reasoning_trace)}</p><span class="badge">${escapeHtml(human(report.judge_interpretation.score_category))}</span></details>`:''}
   <details class="raw-interpretation"><summary>Artifact checksums and limitations</summary><pre>${escapeHtml(JSON.stringify(report.artifact_manifest,null,2))}</pre><ul>${report.limitations.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul></details><div class="panel-foot"><span>Artifact hashes are reported by the worker, not independent attestation.</span><button class="button small" id="exportEvidence">Export evidence assessment</button></div>`;
-  $('#exportEvidence').onclick=()=>download({trial:t,evidence:report},`${id}-evidence.json`);
+  $('#exportEvidence').onclick=async()=>{try{download(await json(`/trials/${encodeURIComponent(id)}/reproducibility`),`${id}-reproducibility.json`);}catch(error){notify(error.message);}};
   node.querySelectorAll('[data-seek-ms]').forEach(button=>button.onclick=()=>{const video=$('#content video[aria-label="Robot policy response"]');if(video&&Number.isFinite(video.duration)){video.pause();video.currentTime=Math.min(video.duration,Number(button.dataset.seekMs)/1000);video.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});}else notify('Recording metadata is not available yet. Load the recording first.');});
  }catch(error){if(node.isConnected)node.innerHTML=`<p class="finding">Evidence assessment unavailable: ${escapeHtml(error.message)}</p>`;}
 }
 
 function mountEvaluation(page,id,query){
+ if(page==='trials'&&id){
+  const t=trials.find(t=>t.trial_id===id);if(t){
+   const notice=document.createElement('section');notice.className='report-banner evidence-notice';
+   notice.innerHTML=`<div><h2>${escapeHtml(evidenceLabel(t))}</h2><p>${recordClass(t)==='synthetic_demo'?'Numbers below are synthetic fixtures, not robot measurements.':recordClass(t)==='unverified'?'These measurements have no validated execution provenance. Do not present them as a robot run.':'Recorded evidence has limits; artifact checks do not attest hardware execution.'} ${t.score_eligible?'Eligible for the experimental cohort score, not certification.':'Excluded from the evaluation score.'}</p><p>${(t.score_exclusion_reasons||[]).map(r=>escapeHtml(human(r))).join(' · ')}</p></div>`;
+   $('#content .page-heading')?.after(notice);
+  }
+ }
  if(page==='compare'){
   const select=()=>{const values=new URLSearchParams({baseline:$('#baselineTrial').value,candidate:$('#candidateTrial').value});history.replaceState(null,'',`#/compare?${values}`);loadComparison();};
   $('#baselineTrial').onchange=select;$('#candidateTrial').onchange=select;loadComparison();
  }
  if(page==='benchmarks')loadBenchmark();
  if(page==='trials'&&id)mountEvidence(id);
- if(page==='trials'&&!id){const option=document.createElement('option');option.value='insufficient_evidence';option.textContent='Insufficient evidence';option.selected=filters.status===option.value;$('#statusFilter').append(option);}
+ if(page==='trials'&&!id){
+  const option=document.createElement('option');option.value='insufficient_evidence';option.textContent='Insufficient evidence';option.selected=filters.status===option.value;$('#statusFilter').append(option);
+  const select=document.createElement('select');select.id='evidenceFilter';select.setAttribute('aria-label','Filter evidence provenance');
+  select.innerHTML=[['all','All evidence'],['eligible','Score-eligible only'],['artifact_validated_simulation','Artifact-validated simulation'],['physical_unattested','Physical, unattested'],['synthetic_demo','Synthetic demo'],['unverified','Unverified'],['not_recorded','No measurements']].map(([v,label])=>`<option value="${v}" ${filters.evidence===v?'selected':''}>${label}</option>`).join('');
+  select.onchange=()=>{filters.evidence=select.value;filterTrials();};$('#content .filters')?.append(select);
+ }
  if(page==='overview'){
-  const first=$('#content .stat');if(first){first.querySelector('.stat-top').firstChild.textContent='Evaluation score';first.querySelector('.stat-note').textContent=summary.score_available?'Within one evaluation cohort':'No pooled score across incompatible cohorts';}
+  const first=$('#content .stat');if(first){first.querySelector('.stat-top').firstChild.textContent='Evaluation score';first.querySelector('.stat-note').textContent=summary.score_available?'Within one evaluation cohort':summary.scored_trials?'No pooled score across incompatible cohorts':'No eligible evidence yet';}
   const caption=$('.score-center small');if(caption)caption.textContent='EVALUATION SCORE';
   if(!summary.score_available){if(first)first.querySelector('.stat-value').textContent='—';$('.score-center strong').textContent='—';}
-  const note=document.createElement('div');note.className='tip';note.innerHTML=`${summary.groups?.length||0} distinct evaluation cohorts · ${summary.excluded_trials||0} insufficient-evidence records excluded from weighted scores. Scores are not calibrated safety probabilities. <a class="text-link" href="#/benchmarks">Inspect coverage →</a>`;$('#content .stats')?.after(note);
+  const note=document.createElement('div');note.className='report-banner evidence-notice';note.innerHTML=`<div><h2>Experimental evaluation platform — not safety certification</h2><p>${summary.scored_trials||0} score-eligible records · ${summary.excluded_trials||0} completed findings excluded. ${Object.entries(summary.evidence_counts||{}).map(([k,n])=>`${n} ${escapeHtml(human(k))}`).join(' · ')||'No measurements recorded.'}</p><p>Outcome charts include legacy/demo findings; they are not verified robot performance. Scores exclude synthetic, unverified, proxy-based and legacy records.</p><a class="text-link" href="#/trials">Inspect evidence provenance →</a></div>`;$('#content .stats')?.before(note);
+  $('#content .panel-header h2').textContent='Reported findings (all evidence types)';
+  loadDemonstrationReadiness(note);
  }
+}
+
+async function loadDemonstrationReadiness(anchor){
+ try{const result=await json('/demonstration-readiness');if(!anchor.isConnected)return;
+  const node=document.createElement('section');node.className='tip';node.id='demonstrationReadiness';
+  node.innerHTML=`<strong>Real-trial milestone: ${result.trial_ids.length?'recorded evidence available — human review still required':'pending actual policy execution'}</strong><p>${result.trial_ids.length?`${result.trial_ids.length} artifact-validated simulation records with a Nemotron review.`:'No qualifying recorded policy trial with a live Nemotron review is available. Test fixtures and provider configuration do not complete this milestone.'}</p><a href="/docs#submission">Demo evidence checklist ↗</a>`;anchor.after(node);
+ }catch(error){if(anchor.isConnected){const node=document.createElement('p');node.className='tip';node.textContent='Real-trial milestone could not be checked. Do not assume execution has been verified.';anchor.after(node);}}
 }

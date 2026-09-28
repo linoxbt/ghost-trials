@@ -30,6 +30,8 @@ class TrialStatus(StrEnum):
     SCORING = "scoring"
     DONE = "done"
     ERROR = "error"
+    BLOCKED = "blocked"
+    RECORDED = "recorded"
 
 
 class StructuredDescription(BaseModel):
@@ -40,6 +42,7 @@ class StructuredDescription(BaseModel):
 
 
 class Scenario(BaseModel):
+    organization_id: str = "legacy"
     scenario_id: str
     prompt: str
     structured_description: StructuredDescription
@@ -48,6 +51,7 @@ class Scenario(BaseModel):
     seed: int
     requested_severity: Severity | None = None
     execution_recipe: dict | None = None
+    generation_provenance: dict | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -68,11 +72,13 @@ class TrialMetrics(BaseModel):
     observation_window_ms: int | None = Field(default=None, ge=0)
     metric_basis: str | None = None
     measurements_are_proxies: bool = True
-    simulation_video_url: str | None = None
+    simulation_video_url: str | None = Field(default=None,
+        description="Legacy response-video field: physical recordings point to uploaded camera footage, not simulation.")
     trace_url: str | None = None
     simulator_version: str | None = None
     policy_checkpoint_digest: str | None = None
-    evidence_origin: Literal["synthetic", "simulator", "unknown"] = "unknown"
+    evidence_origin: Literal["synthetic", "simulator", "physical", "unknown"] = "unknown"
+    hardware_provenance: dict | None = None
     events: list[EvidenceEvent] = Field(default_factory=list)
     artifact_manifest: dict = Field(default_factory=dict)
 
@@ -85,6 +91,7 @@ class JudgeResult(BaseModel):
 
 
 class Trial(BaseModel):
+    organization_id: str = "legacy"
     trial_id: str
     scenario_id: str
     embodiment: str = "UNITREE_G1_SONIC"
@@ -101,10 +108,16 @@ class Trial(BaseModel):
     rubric_version: str = "legacy-unversioned"
     judge_assessment: JudgeResult | None = None
     replay_of: str | None = None
+    execution_mode: Literal["simulation", "physical"] = "simulation"
+    physical_session_id: str | None = None
+    evidence_verification: dict | None = None
 
 
 class TrialView(Trial):
     scenario: Scenario
+    evidence_class: str = "unverified"
+    score_eligible: bool = False
+    score_exclusion_reasons: list[str] = Field(default_factory=list)
 
 
 class ScenarioCreate(BaseModel):
@@ -122,12 +135,14 @@ class SafetyScore(BaseModel):
     policy_name: str
     n_trials: int
     distribution: dict[str, int]
-    safety_score: float
+    safety_score: float | None
     scored_trials: int = 0
     excluded_trials: int = 0
     score_available: bool = True
     groups: list[dict] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    evidence_counts: dict[str, int] = Field(default_factory=dict)
+    exclusion_reasons: dict[str, int] = Field(default_factory=dict)
     generated_at: datetime = Field(default_factory=utc_now)
 
 

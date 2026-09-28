@@ -9,6 +9,7 @@ dependencies = [
   "httpx>=0.28,<1",
   "pydantic-settings>=2.10,<3",
   "uvicorn[standard]>=0.35,<1",
+  "PyJWT[crypto]>=2.10,<3",
 ]
 
 [project.scripts]
@@ -18,6 +19,7 @@ ghost-trials-preflight = "ghost_trials.preflight:main"
 worker = ["imageio[ffmpeg]>=2.37,<3"]
 physics = ["mujoco>=3.3,<4", "numpy>=2,<3"]
 models = ["huggingface-hub>=0.34,<2"]
+storage = ["boto3>=1.40,<2"]
 dev = [
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",

@@ -1,0 +1,67 @@
+# One API worker only. Start from repository root with --env-file explicitly.
+services:
+  dashboard:
+    build:
+      context: ..
+    restart: unless-stopped
+    init: true
+    env_file: [./private/production.env, ./private/access.env]
+    environment:
+      GHOST_DATA_PATH: /data/state.sqlite3
+      GHOST_ARTIFACT_ROOT: /data/artifacts
+    command: ["uvicorn", "ghost_trials.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log", "--log-config", "/app/deployment/logging.json"]
+    volumes:
+      - ghost-production:/data
+    expose: ["8000"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  https:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    environment:
+      GHOST_DOMAIN: ${GHOST_DOMAIN:?Set a permanent backend domain}
+      ACME_EMAIL: ${ACME_EMAIL:?Set certificate contact email}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ghost-tls:/data
+      - ghost-caddy:/config
+    depends_on:
+      dashboard: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  monitor:
+    build:
+      context: ..
+    restart: unless-stopped
+    env_file: [./private/production.env, ./private/access.env]
+    environment:
+      GHOST_MONITOR_ORIGIN: http://dashboard:8000
+      GHOST_MONITOR_DISK: /data
+    command: ["python", "-m", "ghost_trials.monitor"]
+    volumes:
+      - ghost-production:/data:ro
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      dashboard: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  ghost-production:
+  ghost-tls:
+  ghost-caddy:
