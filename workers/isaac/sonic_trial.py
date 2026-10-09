@@ -18,7 +18,7 @@ from workers.isaac.hazards import compile_hazard
 from workers.isaac.traction import GroundTraction
 
 
-def build_scene(source: Path, target: Path):
+def build_scene(source: Path, target: Path, recipe=None):
     """Flatten local includes and preserve their asset paths in the job directory."""
     def expand(path):
         root = ET.parse(path).getroot()
@@ -40,7 +40,10 @@ def build_scene(source: Path, target: Path):
     world = ET.SubElement(root, "worldbody")
     box = ET.SubElement(world, "body", name="ghost_box", pos="0 0 -10")
     ET.SubElement(box, "freejoint", name="ghost_free")
-    ET.SubElement(box, "geom", name="ghost_box_geom", type="box", size="0.15 0.15 0.15", mass="2", rgba="0.7 0.35 0.1 1")
+    size = recipe.box_size_m if recipe else (0.3, 0.3, 0.3)
+    mass = recipe.mass_kg if recipe else 2.0
+    ET.SubElement(box, "geom", name="ghost_box_geom", type="box",
+                  size=" ".join(str(v / 2) for v in size), mass=f"{mass:g}", rgba="0.7 0.35 0.1 1")
     ET.SubElement(world, "camera", name="ghost_witness", pos="3 -3 2.5", xyaxes="0.707 0.707 0 -0.3 0.3 0.9")
     ET.ElementTree(root).write(target, encoding="unicode")
 
@@ -76,7 +79,7 @@ def main():
     config = SimLoopConfig(enable_onscreen=False, enable_offscreen=True, enable_image_publish=True).load_wbc_yaml()
     config["INTERFACE"] = "lo"
     scene = output / "sonic_scene.xml"
-    build_scene(root / config["ROBOT_SCENE"], scene)
+    build_scene(root / config["ROBOT_SCENE"], scene, recipe)
     config["ROBOT_SCENE"] = str(scene)
     (output / "recipe.json").write_text(json.dumps({**recipe.to_dict(), "task": "walk forward 1m", "simulator": "MuJoCo/GEAR-SONIC"}, indent=2))
 

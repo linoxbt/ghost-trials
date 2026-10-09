@@ -100,6 +100,23 @@ def test_hazard_recipe_replay_and_unsupported_type():
 
 
 @pytest.mark.asyncio
+async def test_worker_rejects_unsupported_parameterized_recipe_before_launch(worker):
+    scenario = {"scenario_id": "s1", "prompt": "A box falls into the path", "seed": 5,
+                "severity_tag": "medium", "structured_description": {"objects": ["box"],
+                "hazard_type": "falling_object", "severity": "medium", "expected_safe_behavior": "Avoid the box"}}
+    recipe = compile_hazard(scenario).to_dict()
+    recipe["robot_velocity_m_s"] = 2.0
+    scenario["execution_recipe"] = recipe
+    request = {"scenario": scenario, "execution_backend": "gear_sonic_sim", "embodiment": "UNITREE_G1_SONIC",
+               "policy": {"checkpoint": "fixture", "checkpoint_digest": "sha256:test", "host": "127.0.0.1", "port": 5550}}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=worker.app), base_url="http://worker") as client:
+        response = await client.post("/v1/jobs", json=request, headers={"Authorization": "Bearer test-secret"})
+    assert response.status_code == 422
+    assert "invalid hazard recipe" in response.text.lower()
+    assert not worker.jobs
+
+
+@pytest.mark.asyncio
 async def test_timeout_terminates_runner_before_next_job(worker, monkeypatch, tmp_path):
     # A real child process validates timeout cleanup; it never loads GPU code.
     script = tmp_path / "slow_runner.py"

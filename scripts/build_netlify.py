@@ -29,9 +29,9 @@ def main() -> None:
     (TARGET / "docs").mkdir(exist_ok=True)
     (TARGET / "docs" / "index.html").write_bytes((SOURCE / "docs.html").read_bytes())
 
-    exact = ("health", "capabilities", "scenarios", "trials", "safety-score",
+    exact = ("health", "capabilities", "scenarios", "trials", "hunts", "ghost-cases", "failure-families", "safety-score",
              "benchmarks", "comparisons", "openapi.json", "api/docs", "api/redoc", "ready", "account", "organizations")
-    wildcards = ("trials/*", "artifacts/*", "generated/*", "auth/*", "ops/*", "organizations/*", "physical/*")
+    wildcards = ("trials/*", "hunts/*", "ghost-cases/*", "artifacts/*", "generated/*", "auth/*", "ops/*", "organizations/*", "physical/*")
     rules = [f"/{path} {ORIGIN}/{path} 200!" for path in exact]
     rules.extend(f"/{path} {ORIGIN}/{path.replace('*', ':splat')} 200!" for path in wildcards)
     (TARGET / "_redirects").write_text("\n".join(rules) + "\n")

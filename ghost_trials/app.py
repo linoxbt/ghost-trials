@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from fastapi.staticfiles import StaticFiles
 
-from .adapters import DeterministicIsaacSimulator, LocalRubricJudge, LocalScenarioGenerator, NebiusNemotronJudge
+from .adapters import DeterministicIsaacSimulator, ExecutionBlocked, LocalRubricJudge, LocalScenarioGenerator, NebiusNemotronJudge
 from .config import get_settings
 from .models import PipelineAccepted, SafetyScore, ScenarioCreate, ScoreCategory, TrialStatus, TrialView
 from .pipeline import CertificationPipeline
@@ -22,6 +22,8 @@ from .production import CosmosScenarioGenerator, IsaacRemoteSimulator, Productio
 from .durable import DurableStore
 from .security import AccessControl
 from .jobs import JobRunner
+from .hunt import HuntObjective, SearchSpace, HuntStatus, compare_case_regression, failure_families
+from .hunt_runtime import HuntService
 from .evaluation import (LIMITATIONS, benchmark_report, compare_trials, evidence_report, grouped_summary,
                          summarize, evidence_class, score_exclusion_reasons, reproducibility_report,
                          demonstration_readiness)
@@ -104,6 +106,7 @@ pipeline = CertificationPipeline(
     settings.ghost_policy_name if settings.ghost_simulator_provider != "local" else "development-fixture",
 )
 runner = JobRunner(store, pipeline, settings)
+hunt_service = HuntService(store, pipeline, settings, None, submission_lock)
 pipeline.redact_errors = True
 pipeline.physical_settings = settings
 pipeline.require_robot_evidence = any(p != "local" for p in (
@@ -139,15 +142,17 @@ async def lifespan(_: FastAPI):
     try:
         await store.load()
         await runner.recover()
+        hunt_service.recover()
         await seed_demo()
         runner.start()
         yield
     finally:
+        await hunt_service.stop()
         await runner.stop()
         store.release_lease()
 
 
-app = FastAPI(title="Ghost Trials", version="0.2.0", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
+app = FastAPI(title="Ghost Trials", version="0.3.0", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
 app.middleware("http")(access.middleware)
 
 
@@ -373,6 +378,9 @@ def submission_allowed():
         raise HTTPException(429, "Job quota exceeded")
 
 
+hunt_service.admission = submission_allowed
+
+
 def prior_submission(request: Request, payload):
     key = request.headers.get("idempotency-key")
     if key and (len(key) > 128 or not key.isascii()):
@@ -428,6 +436,8 @@ async def capabilities():
         "admission_controls_configured": bool(settings.ghost_provider_spending_controls_confirmed
             and settings.ghost_platform_budget_cents > 0 and settings.ghost_live_job_reservation_cents > 0),
         "execution_verified_by_this_check": False,  # Configuration is not execution evidence.
+        "configured_checkpoint_digest": settings.gr00t_checkpoint_digest if settings.ghost_simulator_provider == "isaac_http" else None,
+        "configured_embodiment": pipeline.embodiment,
         "readiness": "configured_unverified" if real_selected and all(requirements.values()) else "not_configured",
         "missing_configuration": [name for name, configured in requirements.items() if not configured],
         "expected_outputs": (
@@ -454,6 +464,144 @@ async def create_scenario(request: ScenarioCreate, http_request: Request):
                      platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)
         access.accounts.audit(principal, "job_submitted", trial.trial_id)
         return PipelineAccepted(scenario=scenario, trial=trial)
+
+
+class HuntCreate(BaseModel):
+    objective: HuntObjective
+    max_trials: int = Field(default=12, ge=3, le=50)
+    strategy: Literal["adaptive", "random", "grid"] = "adaptive"
+    search_space: SearchSpace | None = None
+
+
+@app.get("/hunts")
+async def list_hunts(request: Request):
+    return hunt_service.list(current_principal(request).organization_id)
+
+
+@app.post("/hunts", status_code=202)
+async def create_hunt(body: HuntCreate, request: Request):
+    access.require(request, ("admin", "operator"))
+    principal = current_principal(request)
+    async with submission_lock:
+        submission_allowed()
+        try:
+            hunt = hunt_service.create(principal.organization_id, body.objective, body.max_trials,
+                                       body.strategy, body.search_space)
+        except ExecutionBlocked as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        access.accounts.audit(principal, "hunt_created", hunt.hunt_id)
+        hunt_service.launch(hunt.hunt_id, principal.subject)
+    return hunt
+
+
+def owned_hunt(request: Request, hunt_id: str):
+    hunt = hunt_service.get(hunt_id)
+    if not hunt or hunt.organization_id != current_principal(request).organization_id:
+        raise HTTPException(404, "Hunt not found")
+    return hunt
+
+
+@app.get("/hunts/{hunt_id}")
+async def get_hunt(hunt_id: str, request: Request):
+    return owned_hunt(request, hunt_id)
+
+
+@app.post("/hunts/{hunt_id}/resume", status_code=202)
+async def resume_hunt(hunt_id: str, request: Request):
+    access.require(request, ("admin", "operator"))
+    hunt = owned_hunt(request, hunt_id)
+    if hunt.status not in {HuntStatus.INTERRUPTED, HuntStatus.BLOCKED}:
+        raise HTTPException(409, "Only interrupted or blocked Hunts can be resumed")
+    configured_digest = ("synthetic-development-fixture" if settings.ghost_simulator_provider == "local"
+                         else settings.gr00t_checkpoint_digest or "unconfigured")
+    if hunt.policy.checkpoint_digest != configured_digest:
+        raise HTTPException(409, "Worker checkpoint changed; create a new Hunt or replay a Ghost Case")
+    async with submission_lock:
+        submission_allowed()
+        # Explicit resume does not overwrite an in-flight paid trial.
+        if hunt.candidates and hunt.candidates[-1].trial_id:
+            job = store.job(hunt.candidates[-1].trial_id)
+            if job and job["state"] in {"queued", "running"}:
+                raise HTTPException(409, "A Hunt trial is still queued or running; inspect it first")
+        hunt.status = HuntStatus.INTERRUPTED
+        hunt_service.save(hunt)
+        hunt_service.launch(hunt_id, current_principal(request).subject)
+    return hunt
+
+
+@app.get("/ghost-cases")
+async def list_ghost_cases(request: Request):
+    return hunt_service.cases(current_principal(request).organization_id)
+
+
+@app.get("/failure-families")
+async def list_failure_families(request: Request):
+    return failure_families(hunt_service.cases(current_principal(request).organization_id))
+
+
+def owned_case(request: Request, case_id: str):
+    case = hunt_service.case(case_id)
+    if not case or case.organization_id != current_principal(request).organization_id:
+        raise HTTPException(404, "Ghost Case not found")
+    return case
+
+
+@app.get("/ghost-cases/{case_id}")
+async def get_ghost_case(case_id: str, request: Request):
+    return owned_case(request, case_id)
+
+
+@app.post("/ghost-cases/{case_id}/regressions", status_code=202)
+async def run_case_regression(case_id: str, request: Request):
+    access.require(request, ("admin", "operator"))
+    case = owned_case(request, case_id)
+    if (not settings.gr00t_checkpoint_digest or settings.gr00t_checkpoint_digest == case.policy.checkpoint_digest
+            or settings.ghost_simulator_provider != "isaac_http"):
+        raise HTTPException(409, "Configure a different compatible live checkpoint before regression")
+    if pipeline.embodiment != case.policy.embodiment or settings.ghost_execution_backend != hunt_service.get(case.hunt_id).search_space.backend:
+        raise HTTPException(409, "Candidate embodiment or simulator backend is incompatible")
+    baseline = store.trials.get(case.baseline_trial_id)
+    if not baseline:
+        raise HTTPException(409, "Baseline trial is missing")
+    async with submission_lock:
+        submission_allowed()
+        scenario, trial = await pipeline.replay(baseline, persist=False)
+        principal = current_principal(request)
+        store.submit(scenario, trial, reservation_cents=settings.ghost_live_job_reservation_cents,
+                     platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)
+        store.put_domain("regression", trial.trial_id, json.dumps({"organization_id": principal.organization_id,
+                         "case_id": case_id, "trial_id": trial.trial_id}))
+        access.accounts.audit(principal, "case_regression_queued", trial.trial_id)
+    return {"case_id": case_id, "candidate_trial_id": trial.trial_id, "status": "queued"}
+
+
+def regression_view(case, candidate):
+    if candidate.status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}:
+        return {"case_id": case.case_id, "candidate_trial_id": candidate.trial_id, "status": candidate.status}
+    baseline = store.trials[case.baseline_trial_id]
+    return compare_case_regression(case, baseline, candidate,
+                                   store.scenarios[baseline.scenario_id], store.scenarios[candidate.scenario_id])
+
+
+@app.get("/ghost-cases/{case_id}/regressions")
+async def list_case_regressions(case_id: str, request: Request):
+    case = owned_case(request, case_id)
+    rows = [json.loads(raw) for raw in store.list_domain("regression")]
+    return [regression_view(case, store.trials[row["trial_id"]]) for row in rows
+            if row.get("case_id") == case_id and row.get("organization_id") == case.organization_id
+            and row.get("trial_id") in store.trials]
+
+
+@app.get("/ghost-cases/{case_id}/regressions/{trial_id}")
+async def get_case_regression(case_id: str, trial_id: str, request: Request):
+    case = owned_case(request, case_id)
+    raw = store.get_domain("regression", trial_id)
+    if not raw or json.loads(raw).get("case_id") != case_id or json.loads(raw).get("organization_id") != case.organization_id:
+        raise HTTPException(404, "Regression not found")
+    candidate = owned_trial(request, trial_id)
+    return regression_view(case, candidate)
 
 
 @app.get("/trials", response_model=list[TrialView])

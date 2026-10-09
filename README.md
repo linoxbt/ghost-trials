@@ -1,6 +1,6 @@
 # Ghost Trials
 
-Ghost Trials is an **experimental robot-policy evaluation platform** for robotics engineers. It organizes hazard scenarios, trial recordings, telemetry, provenance, and model-assisted findings. It is not an established safety-certification service. Provider integrations are implemented, but a genuine end-to-end robot-policy trial has not yet been demonstrated in this deployment.
+Ghost Trials is an **experimental autonomous red-team platform for physical AI**. Give it a Unitree G1 policy and a task; it searches bounded physical conditions for failures, verifies the recorded evidence, reproduces findings, and replays saved Ghost Cases against a new checkpoint. It is not a safety-certification service. Provider integrations are implemented, but a genuine end-to-end GPU policy Hunt has not yet been demonstrated in this deployment.
 
 This repository is the runnable product shell for the Nebius × NVIDIA Global AI Hackathon Physical AI track. It runs without GPU credentials using deterministic development adapters. Those adapters preserve the production contracts, so Cosmos generation and Isaac Lab-Arena jobs can replace them without changing the API or dashboard.
 
@@ -20,7 +20,7 @@ uv sync --extra dev
 uv run uvicorn ghost_trials.app:app --reload
 ```
 
-Open <http://127.0.0.1:8000> for the animated landing page, `/docs` for documentation, or `/app/` for the evaluation workspace. The first development start seeds six synthetic trials. Submit a demo hazard to create a scenario, schematic preview, synthetic metrics, and a rubric finding. This does not generate Cosmos video or execute a GPU policy.
+Open <http://127.0.0.1:8000> for the animated landing page, `/docs` for documentation, or `/app/` for the Hunt workspace. The first development start seeds six synthetic trials. A local Hunt exercises the queue and search logic with synthetic data; it does not generate Cosmos video, execute a GPU policy, or produce verified Ghost Cases.
 
 For a phone on the same network, run `make mobile`, determine this machine's LAN IP, and open `http://<LAN-IP>:8000` on the phone. Do not expose the development server directly to the public internet.
 
@@ -35,6 +35,12 @@ docker compose up --build
 ```
 
 ## Current build
+
+The [Ghost Hunt guide](docs/HUNT.md) documents supported worker controls, search phases, evidence admission, exact replay, regression, and current live-execution limits.
+
+- Primary Hunt workflow: bounded adaptive/random/grid search, parameterized SONIC/Arena recipes, mutation, exact repeats, conditional empirical boundaries, persisted Ghost Cases, and compatible-checkpoint regression
+- First-class authenticated `/hunts` and `/ghost-cases` API with organization isolation and paid-job admission on every candidate
+- Hunt, Failures, Trials, Compare, and System workspace navigation; physical capture and manual tools remain under System → Advanced
 
 - FastAPI API: `POST /scenarios`, `GET /trials`, `GET /trials/{id}`, `GET /safety-score`, and `WS /live`
 - Persistent, typed scenario and evaluation records

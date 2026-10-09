@@ -8,8 +8,8 @@ from ghost_trials.app import app, settings
 async def test_public_docs_workspace_and_api_have_distinct_routes():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         for path, marker in [
-            ("/", "Find the failure."), ("/app/", "workspace.js"),
-            ("/docs", "What actually generates?"), ("/api/docs", "swagger-ui"),
+            ("/", "Release the Ghost"), ("/app/", "hunt.js"),
+            ("/docs", "Ghost Hunt"), ("/api/docs", "swagger-ui"),
         ]:
             response = await client.get(path)
             assert response.status_code == 200
