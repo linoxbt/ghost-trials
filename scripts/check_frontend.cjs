@@ -9,10 +9,10 @@ const base = origin.replace(/\/$/,'')+'/app';
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base+'/');
-  await page.getByRole('heading',{name:'Evaluation overview'}).waitFor();
+  await page.getByRole('heading',{name:'Ghost Trials',exact:true}).waitFor();
   assert.equal((await (await page.request.get(origin+'/health')).json()).mode,'local','Run this check against a development workspace; it creates a synthetic trial.');
   await page.screenshot({path:'/tmp/ghost-overview-desktop.png',fullPage:true});
-  await page.getByRole('navigation').getByRole('link',{name:'Trial runs'}).click();
+  await page.getByRole('navigation').getByRole('link',{name:'Trials'}).click();
   await page.getByLabel('Search trials').fill('no-matching-record-987');
   await page.getByRole('heading',{name:'No matching trials'}).waitFor();
   await page.getByRole('button',{name:'Clear filters'}).click();
@@ -20,7 +20,7 @@ const base = origin.replace(/\/$/,'')+'/app';
   await page.getByLabel('Filter severity').selectOption('high');
   const rows = await page.locator('.data-table tbody tr').all();
   for(const row of rows) assert.equal(await row.locator('td').nth(1).innerText(),'High');
-  await page.getByRole('navigation').getByRole('link',{name:'Scenario library'}).click();
+  await page.goto(base+'/#/scenarios');
   await page.getByRole('link',{name:'Use template'}).first().click();
   assert.match(await page.getByLabel('Hazard description').inputValue(),/box slips/);
   await page.getByLabel('Scenario seed').fill('773');
@@ -52,7 +52,7 @@ const base = origin.replace(/\/$/,'')+'/app';
   await page.unroute('**/scenarios');
   await page.setViewportSize({width:390,height:844});
   await page.goto(base+'/#/overview');
-  await page.getByRole('heading',{name:'Evaluation overview'}).waitFor();
+  await page.getByRole('heading',{name:'Ghost Trials',exact:true}).waitFor();
   await page.locator('#toast').evaluate(el=>el.hidden=true);
   assert.equal(await page.locator('#sidebar').evaluate(el=>el.inert),true);
   await page.getByRole('button',{name:'Toggle navigation'}).click();
@@ -61,9 +61,9 @@ const base = origin.replace(/\/$/,'')+'/app';
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button',{name:'Toggle navigation'}).getAttribute('aria-expanded'),'false');
   assert.equal(await page.locator('#menuButton').evaluate(el=>el===document.activeElement),true);
-  for(const [path,name] of [['overview','Evaluation overview'],['trials','Trial runs'],['scenarios','Scenario library'],['reports','Reports & evidence'],['system','System'],['new','Create a trial']]){
+  for(const [path,name] of [['overview','Ghost Trials'],['hunt','Release the Ghost'],['failures','Failure library'],['trials','Trial runs'],['scenarios','Scenario library'],['reports','Reports & evidence'],['system','System'],['new','Create a trial']]){
     await page.goto(base+'/#/'+path);
-    await page.getByRole('heading',{name,exact:true}).waitFor();
+    await page.getByRole('heading',{name,exact:path==='overview'||path==='trials'||path==='system'}).waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,`${path}: horizontal page overflow`);
     if(['overview','trials','scenarios','reports'].includes(path)){
       for(const record of await page.locator('.data-table tbody tr').all()){
@@ -78,16 +78,16 @@ const base = origin.replace(/\/$/,'')+'/app';
   await page.getByRole('heading',{name:'Auditor finding'}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'detail overflow');
   await page.goto(base+'/#/overview');
-  await page.getByRole('heading',{name:'Evaluation overview'}).waitFor();
+  await page.getByRole('heading',{name:'Ghost Trials',exact:true}).waitFor();
   await page.screenshot({path:'/tmp/ghost-overview-mobile.png',fullPage:true});
   await page.getByRole('button',{name:'Toggle navigation'}).click();
-  await page.getByRole('navigation').getByRole('link',{name:'Trial runs'}).click();
+  await page.getByRole('navigation').getByRole('link',{name:'Trials'}).click();
   await page.getByRole('heading',{name:'Trial runs',exact:true}).waitFor();
   assert.equal(await page.locator('#sidebar').evaluate(el=>el.inert),true);
   for(const width of [320,768,1280]){
     await page.setViewportSize({width,height:900});
     await page.goto(base+'/#/overview');
-    await page.getByRole('heading',{name:'Evaluation overview'}).waitFor();
+    await page.getByRole('heading',{name:'Ghost Trials',exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,`Overview overflow at ${width}px`);
   }
   assert.deepEqual(errors,[]);

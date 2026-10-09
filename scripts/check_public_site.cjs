@@ -14,7 +14,7 @@ const base=process.env.GHOST_PREVIEW_URL||'http://127.0.0.1:8010';
  await page.getByRole('button',{name:'Play illustration'}).waitFor();
  await page.screenshot({path:'/tmp/ghost-landing-desktop.png',fullPage:false,animations:'disabled'});
  await page.getByRole('link',{name:'Documentation',exact:true}).click();
- await page.getByRole('heading',{name:'From first trial to reviewable evidence.'}).waitFor();
+ await page.getByRole('heading',{name:'From first Hunt to reviewable evidence.'}).waitFor();
  await page.getByPlaceholder('Search documentation…').fill('Cosmos');
  assert.ok(await page.locator('.docs-sidebar nav a:visible').count()>0);
  await page.getByRole('button',{name:'Copy',exact:true}).first().click();

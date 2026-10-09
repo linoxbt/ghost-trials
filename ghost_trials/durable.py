@@ -94,6 +94,21 @@ class DurableStore(TrialStore):
                        (trial.trial_id, trial.model_dump_json()))
         self.trials[trial.trial_id] = trial
 
+    def put_domain(self, kind: str, record_id: str, payload: str):
+        if kind not in {"hunt", "ghost_case", "regression"}:
+            raise ValueError("Unsupported domain record")
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO records VALUES(?,?,?)", (kind, record_id, payload))
+
+    def get_domain(self, kind: str, record_id: str):
+        with self.connect() as db:
+            row = db.execute("SELECT payload FROM records WHERE kind=? AND id=?", (kind, record_id)).fetchone()
+        return row[0] if row else None
+
+    def list_domain(self, kind: str):
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT payload FROM records WHERE kind=? ORDER BY id DESC", (kind,))]
+
     def enqueue(self, trial_id, request_key=None, request_hash=None):
         with self.connect() as db:
             db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted) VALUES(?,?,?,?,?)",

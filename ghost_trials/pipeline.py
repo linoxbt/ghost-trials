@@ -100,9 +100,18 @@ class CertificationPipeline:
                 return
             if not trial.replay_of:
                 await self._status(trial, TrialStatus.GENERATING, "Generating scenario and video")
+                planned_recipe = scenario.execution_recipe
                 scenario = await self.generator.generate(
                     scenario.scenario_id, scenario.prompt, scenario.requested_severity, scenario.seed
                 )
+                if planned_recipe is not None:
+                    from workers.isaac.hazards import compile_hazard
+                    if scenario.structured_description.hazard_type != planned_recipe.get("kind"):
+                        raise ValueError("Generated hazard type differs from the requested trial; no robot trial submitted")
+                    scenario.execution_recipe = planned_recipe
+                    compile_hazard(scenario.model_dump(mode="json"))
+                    if scenario.generation_provenance:
+                        scenario.generation_provenance["video_recipe_alignment"] = "illustrative_only; execution recipe independently parameterized"
                 scenario.organization_id = trial.organization_id
                 await self.store.put_scenario(scenario)
             await asyncio.sleep(self.delay)

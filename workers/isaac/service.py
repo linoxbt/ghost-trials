@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ghost_trials.models import Scenario, TrialMetrics
+from workers.isaac.hazards import compile_hazard, supported_controls
 
 
 class PolicySpec(BaseModel):
@@ -219,6 +220,11 @@ async def submit(
         raise HTTPException(422, f"Worker is pinned to {settings.backend}")
     if request.scenario.structured_description.hazard_type == "surface_instability" and settings.backend != "gear_sonic_sim":
         raise HTTPException(422, "Reduced traction requires gear_sonic_sim; Arena material updates are not validated")
+    try:
+        supported_controls(request.scenario.structured_description.hazard_type, settings.backend)
+        compile_hazard(request.scenario.model_dump(mode="json"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(422, f"Unsupported or invalid hazard recipe: {exc}") from exc
     expected_embodiment = (
         "UNITREE_G1_SONIC" if request.execution_backend == "gear_sonic_sim" else "G1_WBC_JOINT"
     )
