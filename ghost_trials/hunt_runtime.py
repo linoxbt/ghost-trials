@@ -17,11 +17,13 @@ HAZARD_PROMPTS = {
     "falling_object": "A box falls from a warehouse shelf into the robot walking path.",
     "path_obstruction": "An obstacle rolls into the robot walking lane.",
     "surface_instability": "The warehouse floor becomes slippery beneath the walking robot.",
+    "object_positioning": "A gantry robot arm pushes a block into a target band on a tabletop.",
 }
 
 EXECUTABLE_TASKS = {
     "gear_sonic_sim": ("walk forward 1m", "configured SONIC MuJoCo scene"),
     "isaac_arena_gr00t": ("Galileo G1 locomanip pick and place", "configured Galileo G1 Arena scene"),
+    "mujoco_cpu": ("position a block with gantry arm", "CPU MuJoCo tabletop"),
 }
 
 
@@ -45,7 +47,7 @@ class HuntService:
         self.store.put_domain("hunt", hunt.hunt_id, hunt.model_dump_json())
 
     def create(self, organization_id: str, objective: HuntObjective, max_trials: int,
-               strategy: str, search_space: SearchSpace | None = None) -> Hunt:
+               strategy: str, search_space: SearchSpace | None = None, policy_id: str | None = None) -> Hunt:
         if self.settings.ghost_simulator_provider == "isaac_http":
             missing = [name for name, value in {
                 "GPU worker endpoint": self.settings.isaac_job_endpoint,
@@ -59,7 +61,9 @@ class HuntService:
             }.items() if not value]
             if missing:
                 raise ExecutionBlocked(missing)
-        backend = self.settings.ghost_execution_backend if self.settings.ghost_simulator_provider == "isaac_http" else "gear_sonic_sim"
+        backend = ("mujoco_cpu" if self.settings.ghost_simulator_provider == "mujoco_cpu" else
+                   self.settings.ghost_execution_backend if self.settings.ghost_simulator_provider == "isaac_http"
+                   else "gear_sonic_sim")
         if backend not in EXECUTABLE_TASKS:
             raise ValueError(f"Unsupported Hunt backend {backend}")
         if (objective.task, objective.environment) != EXECUTABLE_TASKS[backend]:
@@ -68,10 +72,19 @@ class HuntService:
         if space.backend != backend or space.hazard_type != objective.hazard_type:
             raise ValueError("Search space does not match the configured worker and hazard")
         synthetic = self.settings.ghost_simulator_provider == "local"
-        policy = PolicyVersion(name=self.pipeline.policy_name,
-                               checkpoint="development-fixture" if synthetic else self.settings.gr00t_checkpoint or "unconfigured",
-                               checkpoint_digest="synthetic-development-fixture" if synthetic else self.settings.gr00t_checkpoint_digest or "unconfigured",
-                               embodiment=self.pipeline.embodiment)
+        if backend == "mujoco_cpu":
+            from .cpu_robot import NeuralController, controller
+            selected = controller(policy_id or self.settings.ghost_policy_name)
+            source = "cpu-json" if isinstance(selected, NeuralController) else "builtin"
+            policy = PolicyVersion(name=selected.name, checkpoint=f"{source}:{selected.name}:{selected.version}",
+                                   checkpoint_digest=selected.digest, embodiment=self.pipeline.embodiment)
+        else:
+            if policy_id:
+                raise ValueError("Explicit policy selection is supported only by the CPU backend")
+            policy = PolicyVersion(name=self.pipeline.policy_name,
+                                   checkpoint="development-fixture" if synthetic else self.settings.gr00t_checkpoint or "unconfigured",
+                                   checkpoint_digest="synthetic-development-fixture" if synthetic else self.settings.gr00t_checkpoint_digest or "unconfigured",
+                                   embodiment=self.pipeline.embodiment)
         hunt = Hunt(hunt_id=f"hunt_{uuid.uuid4().hex[:12]}", organization_id=organization_id,
                     objective=objective, policy=policy, search_space=space,
                     strategy=strategy, max_trials=max_trials)
@@ -134,10 +147,15 @@ class HuntService:
                             # This is only a pending placeholder, not a model-generated scene.
                             # Pipeline verifies the actual generated hazard against this recipe.
                             scenario.structured_description.hazard_type = hunt.objective.hazard_type
-                            scenario.execution_recipe = parameterize_hazard(scenario.model_dump(mode="json"),
-                                                                            candidate.controls, hunt.search_space.backend).to_dict()
+                            if hunt.search_space.backend == "mujoco_cpu":
+                                from .cpu_robot import recipe
+                                scenario.execution_recipe = recipe(candidate.seed, candidate.controls)
+                            else:
+                                scenario.execution_recipe = parameterize_hazard(scenario.model_dump(mode="json"),
+                                                                                candidate.controls, hunt.search_space.backend).to_dict()
+                        trial.policy_name = hunt.policy.name
                         scenario.organization_id = trial.organization_id = hunt.organization_id
-                        live = any(p != "local" for p in (self.settings.ghost_scenario_provider,
+                        live = any(p not in {"local", "cpu", "mujoco_cpu"} for p in (self.settings.ghost_scenario_provider,
                                    self.settings.ghost_simulator_provider, self.settings.ghost_judge_provider))
                         reservation = self.settings.ghost_live_job_reservation_cents if live else 0
                         digest = hashlib.sha256(f"{hunt.hunt_id}:{candidate.sequence}:{candidate.controls}:{candidate.seed}".encode()).hexdigest()

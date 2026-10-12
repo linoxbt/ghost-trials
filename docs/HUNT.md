@@ -1,10 +1,10 @@
 # Ghost Hunt: bounded adversarial policy testing
 
-Ghost Trials now uses the existing trial queue, simulator worker, evidence repository, and judge to run a bounded Hunt against one configured Unitree G1 policy. The primary workflow is **Release the Ghost → observe trials → inspect verified failures → replay or regress against a new checkpoint**. This is experimental policy evaluation, not safety certification.
+Ghost Trials uses the existing trial queue, simulator worker, evidence repository, and judge to run a bounded Hunt against an executable policy. The primary workflow is **Release the Ghost → observe trials → inspect verified failures → replay or regress against another controller/checkpoint**. The default is a real CPU MuJoCo gantry-arm task. The Unitree G1/SONIC path remains optional. This is experimental policy evaluation, not safety certification.
 
 ## What actually runs
 
-`POST /hunts` accepts the backend's executable task/environment, supported hazard family, trial budget (3–50), and optional strategy/search space. SONIC currently supports `walk forward 1m` in the configured MuJoCo scene; Arena uses its configured Galileo G1 pick-and-place scene. Arbitrary task text or scene selection is rejected until the worker can execute it. The server pins the policy and embodiment to the configured worker; clients cannot choose arbitrary checkpoint paths. Each candidate is admitted through the same job quota and paid-budget controls as a manual trial. It gets a deterministic seed and a versioned `execution_recipe`. After Cosmos/local generation, the planned recipe is validated against the generated hazard type before the simulator executes. The generated Cosmos video is illustrative; the simulator recording and telemetry are the evidence source.
+`POST /hunts` accepts the backend's executable task/environment, supported hazard family, trial budget (3–50), and optional strategy/search space. CPU mode supports `position a block with gantry arm` in `CPU MuJoCo tabletop`, with a selected registered controller. SONIC supports `walk forward 1m` in its configured MuJoCo scene; Arena uses its configured Galileo G1 pick-and-place scene. Arbitrary task text or scene selection is rejected until a backend can execute it. Candidates use deterministic seeds and versioned `execution_recipe` records. CPU trials use state trajectories and a measured rubric; GPU trials may use illustrative Cosmos video plus simulator recording and telemetry. The two are not interchangeable.
 
 Supported controls reflect executable worker knobs, not hypothetical sliders:
 
@@ -12,6 +12,7 @@ Supported controls reflect executable worker knobs, not hypothetical sliders:
 |---|---|---|
 | Falling object / path obstruction | SONIC/MuJoCo or Isaac Arena | onset time, obstacle forward/lateral offset, obstacle forward speed, object mass |
 | Reduced traction | SONIC/MuJoCo only | onset time, whole-floor friction coefficient |
+| Object positioning | CPU MuJoCo gantry | block mass, table/block friction, starting block x position, controller delay |
 
 The SONIC scene now uses the recipe's object mass. Arena already configures object mass from the recipe. Unsupported parameters, out-of-bounds values, and invalid hazard/backend combinations are rejected before a worker job is accepted. Friction and box hazards remain separate; the current simulator does not claim to test their combination.
 
@@ -25,7 +26,7 @@ Observations are calculated from retained trial metrics: recorded fall/collision
 
 ## Honest readiness status
 
-The local test suite uses synthetic fixtures for search-algorithm and API tests. Those are not evidence of GPU execution. A genuine end-to-end Hunt still requires a compatible, pinned G1 policy checkpoint, an available GPU worker running SONIC or Arena, live Cosmos/Nemotron access, and an actual captured worker trial. In production, missing resources block execution; there is no synthetic fallback.
+The test suite contains both synthetic search-algorithm fixtures and actual CPU MuJoCo trials. The latter are simulator execution evidence, not G1/GPU or physical-hardware evidence. The CPU path needs no paid service and fails closed on unsupported controllers, missing measurements, or corrupt evidence. A genuine G1 end-to-end Hunt still requires a compatible pinned checkpoint, a GPU worker, configured providers, and a captured worker trial; there is no synthetic fallback. See [CPU migration](CPU_MIGRATION.md) for its separate scope and limitations.
 
 ## Live-run handoff (not yet executed)
 

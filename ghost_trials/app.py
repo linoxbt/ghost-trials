@@ -22,8 +22,9 @@ from .production import CosmosScenarioGenerator, IsaacRemoteSimulator, Productio
 from .durable import DurableStore
 from .security import AccessControl
 from .jobs import JobRunner
-from .hunt import HuntObjective, SearchSpace, HuntStatus, compare_case_regression, failure_families
+from .hunt import HuntObjective, SearchSpace, HuntStatus, compare_case_regression, failure_families, default_space
 from .hunt_runtime import HuntService
+from .cpu_robot import CpuScenarioGenerator, CpuMujocoSimulator, CpuMeasuredJudge, BACKEND as CPU_BACKEND, controller as cpu_controller
 from .evaluation import (LIMITATIONS, benchmark_report, compare_trials, evidence_report, grouped_summary,
                          summarize, evidence_class, score_exclusion_reasons, reproducibility_report,
                          demonstration_readiness)
@@ -40,6 +41,9 @@ if settings.ghost_mode == "production":
     invalid = [f"{name}={actual!r} (expected {required!r})" for name, (actual, required) in expected.items() if actual != required]
     if invalid:
         raise ProductionConfigurationError("Production mode cannot use local adapters: " + ", ".join(invalid))
+if settings.ghost_mode == "cpu" and (settings.ghost_scenario_provider, settings.ghost_simulator_provider,
+                                     settings.ghost_judge_provider) != ("cpu", "mujoco_cpu", "cpu"):
+    raise ProductionConfigurationError("CPU mode requires cpu/mujoco_cpu/cpu providers; no synthetic fallback")
 store = DurableStore(settings.ghost_data_path)
 access = AccessControl(settings, store)
 subscribers: set[WebSocket] = set()
@@ -69,6 +73,8 @@ async def publish(event) -> None:
 
 
 def build_generator():
+    if settings.ghost_scenario_provider == "cpu":
+        return CpuScenarioGenerator()
     if settings.ghost_scenario_provider == "cosmos":
         return CosmosScenarioGenerator(settings)
     if settings.ghost_scenario_provider == "local":
@@ -77,6 +83,8 @@ def build_generator():
 
 
 def build_simulator():
+    if settings.ghost_simulator_provider == "mujoco_cpu":
+        return CpuMujocoSimulator()
     if settings.ghost_simulator_provider == "isaac_http":
         return IsaacRemoteSimulator(settings)
     if settings.ghost_simulator_provider == "local":
@@ -84,7 +92,9 @@ def build_simulator():
     raise ProductionConfigurationError(f"Unknown simulator provider: {settings.ghost_simulator_provider}")
 
 
-if settings.ghost_judge_provider == "nebius":
+if settings.ghost_judge_provider == "cpu":
+    judge = CpuMeasuredJudge()
+elif settings.ghost_judge_provider == "nebius":
     judge = NebiusNemotronJudge(settings)
 elif settings.ghost_judge_provider == "local":
     judge = LocalRubricJudge()
@@ -98,6 +108,8 @@ pipeline = CertificationPipeline(
     publish,
     settings.ghost_pipeline_delay_seconds,
     (
+        "GHOST_GANTRY_XY"
+        if settings.ghost_simulator_provider == "mujoco_cpu" else
         "G1_WBC_JOINT"
         if settings.ghost_simulator_provider == "isaac_http"
         and settings.ghost_execution_backend == "isaac_arena_gr00t"
@@ -111,7 +123,10 @@ pipeline.redact_errors = True
 pipeline.physical_settings = settings
 pipeline.require_robot_evidence = any(p != "local" for p in (
     settings.ghost_scenario_provider, settings.ghost_simulator_provider, settings.ghost_judge_provider))
-if settings.ghost_simulator_provider == "isaac_http":
+if settings.ghost_simulator_provider == "mujoco_cpu":
+    from .cpu_evidence import CpuEvidenceRepository
+    pipeline.evidence_repository = CpuEvidenceRepository(settings)
+elif settings.ghost_simulator_provider == "isaac_http":
     from .artifacts import EvidenceRepository
     pipeline.evidence_repository = EvidenceRepository(settings)
 
@@ -366,7 +381,7 @@ async def logout(request: Request):
 def submission_allowed():
     if store.maintenance():
         raise HTTPException(503, "Submissions paused for maintenance")
-    live = any(provider != "local" for provider in (settings.ghost_scenario_provider,
+    live = any(provider not in {"local", "cpu", "mujoco_cpu"} for provider in (settings.ghost_scenario_provider,
                settings.ghost_simulator_provider, settings.ghost_judge_provider))
     if live and (not access.enabled or not settings.ghost_live_execution_enabled):
         raise HTTPException(503, "Live execution requires authentication and explicit operator enablement")
@@ -410,6 +425,18 @@ async def health():
 
 @app.get("/capabilities")
 async def capabilities():
+    if settings.ghost_simulator_provider == "mujoco_cpu":
+        from .cpu_robot import available_policies
+        return {"mode": settings.ghost_mode, "video_generation_enabled": False,
+                "robot_execution_enabled": True, "judge_provider": "cpu",
+                "live_execution_enabled": True, "admission_controls_configured": True,
+                "execution_verified_by_this_check": False,
+                "configured_checkpoint_digest": cpu_controller(settings.ghost_policy_name).digest,
+                "configured_embodiment": pipeline.embodiment,
+                "readiness": "cpu_physics_configured_unverified", "missing_configuration": [],
+                "supported_policies": available_policies(),
+                "cpu_search_space": default_space("object_positioning", "mujoco_cpu").model_dump(),
+                "expected_outputs": ["MuJoCo trajectory", "raw telemetry", "measured task outcome", "hash-verified evidence"]}
     # Configuration facts only: never expose secret values or imply GPU readiness.
     requirements = {
         "Cosmos endpoint": bool(settings.cosmos_base_url or settings.cosmos_api_style == "nvidia_catalog"),
@@ -458,7 +485,7 @@ async def create_scenario(request: ScenarioCreate, http_request: Request):
         scenario, trial = await pipeline.create(request, persist=False)
         principal = current_principal(http_request)
         scenario.organization_id = trial.organization_id = principal.organization_id
-        reserve = settings.ghost_live_job_reservation_cents if any(p != "local" for p in
+        reserve = settings.ghost_live_job_reservation_cents if any(p not in {"local", "cpu", "mujoco_cpu"} for p in
             (settings.ghost_scenario_provider, settings.ghost_simulator_provider, settings.ghost_judge_provider)) else 0
         store.submit(scenario, trial, key, digest, reservation_cents=reserve,
                      platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)
@@ -471,6 +498,7 @@ class HuntCreate(BaseModel):
     max_trials: int = Field(default=12, ge=3, le=50)
     strategy: Literal["adaptive", "random", "grid"] = "adaptive"
     search_space: SearchSpace | None = None
+    policy_id: str | None = None
 
 
 @app.get("/hunts")
@@ -486,7 +514,7 @@ async def create_hunt(body: HuntCreate, request: Request):
         submission_allowed()
         try:
             hunt = hunt_service.create(principal.organization_id, body.objective, body.max_trials,
-                                       body.strategy, body.search_space)
+                                       body.strategy, body.search_space, body.policy_id)
         except ExecutionBlocked as exc:
             raise HTTPException(503, str(exc)) from exc
         except ValueError as exc:
@@ -515,6 +543,7 @@ async def resume_hunt(hunt_id: str, request: Request):
     if hunt.status not in {HuntStatus.INTERRUPTED, HuntStatus.BLOCKED}:
         raise HTTPException(409, "Only interrupted or blocked Hunts can be resumed")
     configured_digest = ("synthetic-development-fixture" if settings.ghost_simulator_provider == "local"
+                         else hunt.policy.checkpoint_digest if settings.ghost_simulator_provider == "mujoco_cpu"
                          else settings.gr00t_checkpoint_digest or "unconfigured")
     if hunt.policy.checkpoint_digest != configured_digest:
         raise HTTPException(409, "Worker checkpoint changed; create a new Hunt or replay a Ghost Case")
@@ -553,14 +582,28 @@ async def get_ghost_case(case_id: str, request: Request):
     return owned_case(request, case_id)
 
 
+class RegressionCreate(BaseModel):
+    policy_id: str | None = None
+
+
 @app.post("/ghost-cases/{case_id}/regressions", status_code=202)
-async def run_case_regression(case_id: str, request: Request):
+async def run_case_regression(case_id: str, request: Request, body: RegressionCreate | None = None):
     access.require(request, ("admin", "operator"))
     case = owned_case(request, case_id)
-    if (not settings.gr00t_checkpoint_digest or settings.gr00t_checkpoint_digest == case.policy.checkpoint_digest
+    cpu = settings.ghost_simulator_provider == "mujoco_cpu"
+    if cpu:
+        try:
+            candidate_controller = cpu_controller(body.policy_id if body and body.policy_id else
+                                                  "gantry-push-v2" if case.policy.name == "gantry-push-v1" else "gantry-push-v1")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if candidate_controller.digest == case.policy.checkpoint_digest:
+            raise HTTPException(409, "Choose a different executable controller for regression")
+    elif (not settings.gr00t_checkpoint_digest or settings.gr00t_checkpoint_digest == case.policy.checkpoint_digest
             or settings.ghost_simulator_provider != "isaac_http"):
         raise HTTPException(409, "Configure a different compatible live checkpoint before regression")
-    if pipeline.embodiment != case.policy.embodiment or settings.ghost_execution_backend != hunt_service.get(case.hunt_id).search_space.backend:
+    configured_backend = CPU_BACKEND if cpu else settings.ghost_execution_backend
+    if pipeline.embodiment != case.policy.embodiment or configured_backend != hunt_service.get(case.hunt_id).search_space.backend:
         raise HTTPException(409, "Candidate embodiment or simulator backend is incompatible")
     baseline = store.trials.get(case.baseline_trial_id)
     if not baseline:
@@ -568,8 +611,10 @@ async def run_case_regression(case_id: str, request: Request):
     async with submission_lock:
         submission_allowed()
         scenario, trial = await pipeline.replay(baseline, persist=False)
+        if cpu:
+            trial.policy_name = candidate_controller.name
         principal = current_principal(request)
-        store.submit(scenario, trial, reservation_cents=settings.ghost_live_job_reservation_cents,
+        store.submit(scenario, trial, reservation_cents=0 if cpu else settings.ghost_live_job_reservation_cents,
                      platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)
         store.put_domain("regression", trial.trial_id, json.dumps({"organization_id": principal.organization_id,
                          "case_id": case_id, "trial_id": trial.trial_id}))
@@ -668,7 +713,7 @@ async def replay_trial(trial_id: str, request: Request):
         submission_allowed()
         scenario, trial = await pipeline.replay(original, persist=False)
         principal = current_principal(request)
-        reserve = settings.ghost_live_job_reservation_cents if any(p != "local" for p in
+        reserve = settings.ghost_live_job_reservation_cents if any(p not in {"local", "cpu", "mujoco_cpu"} for p in
             (settings.ghost_scenario_provider, settings.ghost_simulator_provider, settings.ghost_judge_provider)) else 0
         store.submit(scenario, trial, key, digest, reservation_cents=reserve,
                      platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)

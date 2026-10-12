@@ -8,7 +8,8 @@ import httpx
 
 async def main():
     token = secrets.token_urlsafe(48)
-    os.environ.update(GHOST_MODE="local", GHOST_ADMIN_TOKEN=token,
+    os.environ.update(GHOST_MODE="local", GHOST_SCENARIO_PROVIDER="local",
+                     GHOST_SIMULATOR_PROVIDER="local", GHOST_JUDGE_PROVIDER="local", GHOST_ADMIN_TOKEN=token,
                      GHOST_PIPELINE_DELAY_SECONDS="0", GHOST_DATA_PATH="/data/smoke.sqlite3")
     from ghost_trials.app import app, lifespan
     async with lifespan(app), httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://smoke") as client:

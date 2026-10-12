@@ -1,8 +1,8 @@
 # Ghost Trials
 
-Ghost Trials is an **experimental autonomous red-team platform for physical AI**. Give it a Unitree G1 policy and a task; it searches bounded physical conditions for failures, verifies the recorded evidence, reproduces findings, and replays saved Ghost Cases against a new checkpoint. It is not a safety-certification service. Provider integrations are implemented, but a genuine end-to-end GPU policy Hunt has not yet been demonstrated in this deployment.
+Ghost Trials is an **experimental autonomous red-team platform for physical AI**. Give it an executable robot controller and a task; it searches bounded physical conditions for failures, verifies recorded evidence, reproduces findings, and replays saved Ghost Cases against another controller. It is not a safety-certification service. The default path runs real headless MuJoCo physics on CPU. The original Unitree G1/SONIC/Isaac path remains optional and has not been demonstrated end to end in this deployment.
 
-This repository is the runnable product shell for the Nebius × NVIDIA Global AI Hackathon Physical AI track. It runs without GPU credentials using deterministic development adapters. Those adapters preserve the production contracts, so Cosmos generation and Isaac Lab-Arena jobs can replace them without changing the API or dashboard.
+The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. NVIDIA/Nebius services are optional integrations, not dependencies of CPU execution. The legacy `local` adapter remains synthetic and is development-only.
 
 ## Hackathon submission
 
@@ -10,7 +10,7 @@ The [Devpost submission package](docs/submission/README.md) contains the project
 
 ## Quick start
 
-Requirements: Python 3.11+, Node 22+, npm, and `uv`.
+Requirements: CPU-only Linux, Python 3.11+, Node 22+, npm, and `uv`. See [CPU deployment and limitations](docs/CPU_MIGRATION.md).
 
 ```bash
 cp .env.example .env
@@ -20,7 +20,15 @@ uv sync --extra dev
 uv run uvicorn ghost_trials.app:app --reload
 ```
 
-Open <http://127.0.0.1:8000> for the animated landing page, `/docs` for documentation, or `/app/` for the Hunt workspace. The first development start seeds six synthetic trials. A local Hunt exercises the queue and search logic with synthetic data; it does not generate Cosmos video, execute a GPU policy, or produce verified Ghost Cases.
+If you already have a private `.env` selecting the GPU/production providers, leave it intact and start the CPU mode explicitly with `uv run python -m scripts.run_cpu`.
+
+Open <http://127.0.0.1:8000> for the landing page, `/docs` for documentation, or `/app/` for the Hunt workspace. Choose **CPU MuJoCo tabletop**, an executable gantry controller, and **Release the Ghost**. Completed CPU trials contain measured telemetry and a state-derived trajectory SVG, not a fabricated robot video. With the CPU defaults in `.env.example`, no GPU, CUDA, API key, or paid service is needed. An existing private `.env` may override those defaults; consult its provider settings before starting.
+
+Run a repeatable full API/worker/evidence check (nine bounded grid trials, exact replay, alternate-controller regression):
+
+```bash
+uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-validation
+```
 
 For a phone on the same network, run `make mobile`, determine this machine's LAN IP, and open `http://<LAN-IP>:8000` on the phone. Do not expose the development server directly to the public internet.
 
@@ -59,7 +67,7 @@ The [Ghost Hunt guide](docs/HUNT.md) documents supported worker controls, search
 
 See [the frontend guide](docs/FRONTEND.md) for view URLs, brand assets, and browser checks.
 
-The default `local` mode is intentionally a development adapter. Its scene previews and telemetry are synthetic and must not be presented as Cosmos or Isaac output. The real provider clients, authenticated GPU worker, trace-derived metrics, and deployment steps are documented in [docs/PRODUCTION.md](docs/PRODUCTION.md).
+The default `cpu` mode executes MuJoCo physics. The separate `local` mode remains an intentionally synthetic development adapter and its outputs must not be presented as MuJoCo, Cosmos, or Isaac output. Optional hosted providers and the GPU worker are documented in [docs/PRODUCTION.md](docs/PRODUCTION.md).
 
 ## Nebius Nemotron mode
 
@@ -121,13 +129,14 @@ hazard prompt
      ▼
 ScenarioGenerator ──► Simulator ──► TrialJudge ──► evidence record
      │                    │              │                │
- Cosmos adapter       Isaac job     Nemotron API    dashboard/export
- local adapter        seeded local  fixed rubric
+ CPU task            MuJoCo CPU      measured rubric  trace/SVG/export
+ Cosmos adapter      Isaac job       Nemotron API    optional GPU path
+ local adapter       seeded local    fixed rubric    synthetic dev only
 ```
 
 ## Experimental evaluation score
 
-Synthetic demo records, unverified measurements, legacy rubrics, proxy-only measurements, incomplete artifacts, uncertain findings, and records without a live Nemotron review are excluded. A stored outcome or a configured provider is not execution proof. An unavailable score is `null`, not zero. Demo findings remain inspectable and prominently labeled. The legacy API field `/safety-score` remains for compatibility; it does not imply certification.
+Synthetic demo records, unverified measurements, legacy rubrics, proxy-only measurements, incomplete artifacts, and uncertain findings are excluded. CPU trials use the versioned, measured `cpu-object-positioning-v1` rubric and do not pretend to have a Nemotron review. GPU-path trials require the configured live judge. A stored outcome or a configured provider is not execution proof. An unavailable score is `null`, not zero. The legacy API field `/safety-score` remains for compatibility; it does not imply certification.
 
 `GET /trials/ID/reproducibility` exports scenario/configuration, checkpoint identity, execution recipe, raw trace and response-video references, hashes, verification results, original judge assessment, and measurement/replay limitations. Artifact references require authorization; this JSON does not embed the video. `GET /demonstration-readiness` reports the narrow recorded-trial milestone, never competition eligibility or hardware attestation.
 
@@ -159,8 +168,7 @@ This implementation supports individual Privy email/Google identities and
 organization-isolated workspaces in one API process. Team invitations, role
 changes, session revocation, tenant-filtered media/live updates, and atomic
 execution-admission budgets are implemented. See [account setup](docs/AUTHENTICATION.md).
-Real GPU execution and independent expert validation remain required before
-promotion; these are not demonstrated by synthetic previews or unit tests.
+CPU MuJoCo trials can now run and pass trace/metric integrity checks without GPU access. Independent robotics expert review and real-world validation are still absent; CPU evidence is simulation evidence, not hardware attestation. The optional G1/SONIC GPU path still requires its own live acceptance run.
 
 ## Physical robot recordings
 

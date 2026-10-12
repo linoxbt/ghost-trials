@@ -60,6 +60,28 @@ def test_adaptive_moves_near_vulnerable_region_and_reproduces_identical_seed():
     assert boundary.seed == source.seed
 
 
+def test_cpu_failure_at_mass_ceiling_still_probes_observed_boundary():
+    space = default_space("object_positioning", "mujoco_cpu")
+    h = Hunt(hunt_id="hunt_cpu_edge", organization_id="org_a", objective=HuntObjective(
+        task="position a block with gantry arm", environment="CPU MuJoCo tabletop",
+        hazard_type="object_positioning"), policy=PolicyVersion(name="gantry-push-v1",
+        checkpoint="builtin:gantry-push-v1:1", checkpoint_digest="sha256:test",
+        embodiment="GHOST_GANTRY_XY"), search_space=space, max_trials=10)
+    controls = {d.name: d.default for d in space.dimensions}
+    controls["object_mass_kg"] = 1.0
+    for sequence in range(1, 5):
+        h.candidates.append(TrialCandidate(sequence=sequence, phase="explore", controls=controls.copy(),
+                                           seed=7, outcome="failure" if sequence == 4 else "pass"))
+    for _ in range(2):
+        repeated = HuntPlanner(h).next()
+        assert repeated.phase == "reproduce" and repeated.controls == controls
+        repeated.outcome = "failure"
+        h.candidates.append(repeated)
+    probe = HuntPlanner(h).next()
+    assert probe.phase == "boundary" and probe.seed == 7
+    assert probe.controls["object_mass_kg"] == .05
+
+
 def test_custom_supported_subspace_can_adapt_without_default_boundary_axis():
     space = default_space("surface_instability", "gear_sonic_sim")
     space.dimensions = [d for d in space.dimensions if d.name == "onset_s"]

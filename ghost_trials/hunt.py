@@ -9,9 +9,18 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
-from .evaluation import RUBRIC_VERSION, compare_trials, evidence_class, evidence_report
+from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, compare_trials, evidence_class, evidence_report, expected_rubric
 from .models import Trial, TrialStatus, utc_now
-from workers.isaac.hazards import supported_controls
+from workers.isaac.hazards import supported_controls as isaac_supported_controls
+
+
+def supported_controls(kind: str, backend: str) -> dict:
+    if backend == "mujoco_cpu":
+        from .cpu_robot import CONTROL_BOUNDS, HAZARD
+        if kind != HAZARD:
+            raise ValueError("CPU backend supports object_positioning only")
+        return CONTROL_BOUNDS
+    return isaac_supported_controls(kind, backend)
 
 
 class HuntStatus(StrEnum):
@@ -80,7 +89,9 @@ def default_space(hazard_type: str, backend: str) -> SearchSpace:
     controls = supported_controls(hazard_type, backend)
     # Defaults are conservative midpoints; every supported control remains bounded.
     defaults = {"onset_s": 3.0, "obstacle_distance_m": .8, "obstacle_lateral_m": 0.0,
-                "obstacle_speed_m_s": .6, "object_mass_kg": 2.0, "friction_coefficient": .2}
+                "obstacle_speed_m_s": .6, "object_mass_kg": .15 if backend == "mujoco_cpu" else 2.0,
+                "friction_coefficient": .2, "surface_friction": .3,
+                "object_position_x_m": .4, "controller_delay_s": 0.0}
     return SearchSpace(backend=backend, hazard_type=hazard_type, dimensions=[
         SearchDimension(name=name, minimum=lo, maximum=hi, default=defaults[name], unit=unit,
                         applicability=f"{hazard_type}/{backend}")
@@ -91,7 +102,7 @@ def default_space(hazard_type: str, backend: str) -> SearchSpace:
 class HuntObjective(BaseModel):
     task: str = Field(min_length=8, max_length=240)
     environment: str = Field(default="warehouse aisle", min_length=3, max_length=120)
-    hazard_type: Literal["falling_object", "path_obstruction", "surface_instability"]
+    hazard_type: Literal["falling_object", "path_obstruction", "surface_instability", "object_positioning"]
 
 
 class PolicyVersion(BaseModel):
@@ -149,7 +160,8 @@ class GhostCase(BaseModel):
     judge_interpretation: dict | None = None
     evidence_verification: dict
     artifact_manifest: dict
-    recording_url: str
+    recording_url: str | None
+    trajectory_url: str | None = None
     telemetry_url: str
     reproduction: ReproductionResult = Field(default_factory=ReproductionResult)
     boundary: FailureBoundary | None = None
@@ -251,14 +263,15 @@ class HuntPlanner:
                 return TrialCandidate(sequence=sequence, phase="reproduce", controls=anchor.controls.copy(), seed=anchor.seed)
             if failures:
                 anchor = next((c for c in reversed(failures) if c.phase != "reproduce"), anchor)
-                preferred = "friction_coefficient" if self.space.hazard_type == "surface_instability" else "obstacle_speed_m_s"
+                preferred = ("object_mass_kg" if self.space.backend == "mujoco_cpu" else
+                             "friction_coefficient" if self.space.hazard_type == "surface_instability" else "obstacle_speed_m_s")
                 dimension = next((d for d in self.space.dimensions if d.name == preferred), self.space.dimensions[0])
                 probes = [c for c in h.candidates if c.phase == "boundary" and c.seed == anchor.seed
                           and all(c.controls[d.name] == anchor.controls[d.name]
                                   for d in self.space.dimensions if d.name != dimension.name)]
                 passing_probe = next((c for c in reversed(probes) if c.outcome == "pass"), None)
-                if not probes and anchor.controls[dimension.name] not in {dimension.minimum, dimension.maximum}:
-                    favorable = dimension.maximum if dimension.name in {"friction_coefficient", "obstacle_distance_m", "onset_s"} else dimension.minimum
+                favorable = dimension.maximum if dimension.name in {"friction_coefficient", "obstacle_distance_m", "onset_s"} else dimension.minimum
+                if not probes and anchor.controls[dimension.name] != favorable:
                     controls = anchor.controls.copy()
                     controls[dimension.name] = favorable
                     return TrialCandidate(sequence=sequence, phase="boundary", controls=controls, seed=anchor.seed)
@@ -298,7 +311,7 @@ def empirical_boundary(hunt: Hunt) -> FailureBoundary | None:
                                    statement=f"Within this tested pair, outcome changed between {passed.controls[name]} and {failed.controls[name]} {name}; this is not a universal threshold.",
                                    scope={"checkpoint_digest": hunt.policy.checkpoint_digest, "embodiment": hunt.policy.embodiment,
                                           "simulator_version": failed.simulator_version,
-                                          "rubric_version": RUBRIC_VERSION,
+                                          "rubric_version": CPU_RUBRIC_VERSION if hunt.search_space.backend == "mujoco_cpu" else RUBRIC_VERSION,
                                           "environment": hunt.objective.environment, "backend": hunt.search_space.backend,
                                           "search_space": hunt.search_space.model_dump()})
     return None
@@ -314,18 +327,18 @@ def case_from_trial(hunt: Hunt, trial: Trial, scenario) -> GhostCase:
     if (not scenario.execution_recipe or not m or m.policy_checkpoint_digest != hunt.policy.checkpoint_digest
             or trial.organization_id != hunt.organization_id or scenario.organization_id != hunt.organization_id
             or trial.scenario_id != scenario.scenario_id or trial.embodiment != hunt.policy.embodiment
-            or trial.rubric_version != RUBRIC_VERSION or not m.simulator_version):
+            or trial.rubric_version != expected_rubric(trial) or not m.simulator_version):
         raise ValueError("Case requires matching cohort, checkpoint, and complete recipe")
     return GhostCase(case_id=f"gcase_{hashlib.sha256(trial.trial_id.encode()).hexdigest()[:12]}", hunt_id=hunt.hunt_id,
                      organization_id=hunt.organization_id, baseline_trial_id=trial.trial_id, scenario_id=scenario.scenario_id,
                      execution_recipe=scenario.execution_recipe, seed=scenario.seed, environment=hunt.objective.environment,
                      task=hunt.objective.task, hazard_type=scenario.structured_description.hazard_type,
                      observed_failure_mode="fall_or_collision" if m.fall_or_collision else "task_noncompletion",
-                     policy=hunt.policy, simulator_version=m.simulator_version, rubric_version=RUBRIC_VERSION,
+                     policy=hunt.policy, simulator_version=m.simulator_version, rubric_version=expected_rubric(trial),
                      measured_metrics=m.model_dump(mode="json"),
                      judge_interpretation=trial.judge_assessment.model_dump(mode="json") if trial.judge_assessment else None,
                      evidence_verification=trial.evidence_verification, artifact_manifest=m.artifact_manifest,
-                     recording_url=m.simulation_video_url, telemetry_url=m.trace_url)
+                     recording_url=m.simulation_video_url, trajectory_url=m.trajectory_url, telemetry_url=m.trace_url)
 
 
 def failure_families(cases: list[GhostCase]) -> list[FailureFamily]:

@@ -10,6 +10,8 @@ dependencies = [
   "pydantic-settings>=2.10,<3",
   "uvicorn[standard]>=0.35,<1",
   "PyJWT[crypto]>=2.10,<3",
+  "mujoco>=3.3,<4",
+  "numpy>=2,<3",
 ]
 
 [project.scripts]
@@ -17,7 +19,7 @@ ghost-trials-preflight = "ghost_trials.preflight:main"
 
 [project.optional-dependencies]
 worker = ["imageio[ffmpeg]>=2.37,<3"]
-physics = ["mujoco>=3.3,<4", "numpy>=2,<3"]
+physics = [] # Compatibility alias; MuJoCo is now a required CPU runtime dependency.
 models = ["huggingface-hub>=0.34,<2"]
 storage = ["boto3>=1.40,<2"]
 dev = [
