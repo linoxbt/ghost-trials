@@ -91,7 +91,8 @@ async def test_gpu_missing_configuration_never_calls_network(monkeypatch):
 async def test_gpu_acceptance_download_and_origin_guard(tmp_path, monkeypatch, foreign_origin):
     result, files = bundle(tmp_path / "source")
     settings = Settings(_env_file=None, isaac_job_endpoint="https://worker/", isaac_job_token="secret",
-                        gr00t_checkpoint="/models/policy", gr00t_checkpoint_digest="sha256:test")
+                            gr00t_checkpoint="/models/policy", gr00t_checkpoint_digest="sha256:test",
+                            ghost_execution_backend="gear_sonic_sim")
     monkeypatch.setattr(gpu_acceptance, "get_settings", lambda: settings)
     result["artifact_urls"] = {name: f"https://{'other' if foreign_origin else 'worker'}/artifacts/{name}?signature=test" for name in files}
     requests = []

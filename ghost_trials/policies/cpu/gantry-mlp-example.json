@@ -1,0 +1,9 @@
+{
+  "schema": "ghost-cpu-mlp-v1",
+  "robot_model": "ghost-gantry-xy-v1",
+  "version": "1",
+  "layers": [
+    {"weights": [[6.0, 0.0, 0.0, 0.0], [0.0, 1.0, -1.0, 0.0]], "bias": [-1.0, 0.0]},
+    {"weights": [[2.5, 0.2]], "bias": [0.0]}
+  ]
+}

@@ -74,6 +74,7 @@ class TrialMetrics(BaseModel):
     measurements_are_proxies: bool = True
     simulation_video_url: str | None = Field(default=None,
         description="Legacy response-video field: physical recordings point to uploaded camera footage, not simulation.")
+    trajectory_url: str | None = Field(default=None, description="State-derived visualization; not camera footage.")
     trace_url: str | None = None
     simulator_version: str | None = None
     policy_checkpoint_digest: str | None = None
@@ -81,6 +82,7 @@ class TrialMetrics(BaseModel):
     hardware_provenance: dict | None = None
     events: list[EvidenceEvent] = Field(default_factory=list)
     artifact_manifest: dict = Field(default_factory=dict)
+    robot_metrics: dict | None = Field(default=None, description="Task-specific measurements derived from simulator state.")
 
 
 class JudgeResult(BaseModel):

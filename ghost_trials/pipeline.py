@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from .adapters import ExecutionBlocked, ScenarioGenerator, Simulator, TrialJudge
 from .models import LiveEvent, Scenario, ScenarioCreate, Severity, StructuredDescription, Trial, TrialStatus
 from .store import TrialStore
-from .evaluation import RUBRIC_VERSION, guard_judgment
+from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, guard_judgment
 
 
 Publish = Callable[[LiveEvent], Awaitable[None]]
@@ -49,7 +49,7 @@ class CertificationPipeline:
             ),
         )
         trial = Trial(trial_id=trial_id, scenario_id=scenario_id, embodiment=self.embodiment,
-                      policy_name=self.policy_name, rubric_version=RUBRIC_VERSION)
+                      policy_name=self.policy_name, rubric_version=CPU_RUBRIC_VERSION if getattr(self.simulator, "accepts_trial", False) else RUBRIC_VERSION)
         if persist:
             await self.store.put_scenario(scenario)
             await self.store.put_trial(trial)
@@ -69,8 +69,8 @@ class CertificationPipeline:
             raise ValueError("Scenario generation must finish before reusing a scenario")
         trial = Trial(trial_id=f"trl_{uuid.uuid4().hex[:12]}", scenario_id=scenario.scenario_id,
                       organization_id=original.organization_id,
-                      embodiment=self.embodiment, policy_name=self.policy_name,
-                      rubric_version=RUBRIC_VERSION, replay_of=original.trial_id)
+                      embodiment=self.embodiment, policy_name=original.policy_name if getattr(self.simulator, "accepts_trial", False) else self.policy_name,
+                      rubric_version=original.rubric_version, replay_of=original.trial_id)
         if persist:
             await self.store.put_trial(trial)
         return scenario, trial
@@ -104,19 +104,28 @@ class CertificationPipeline:
                 scenario = await self.generator.generate(
                     scenario.scenario_id, scenario.prompt, scenario.requested_severity, scenario.seed
                 )
+                if getattr(self.simulator, "accepts_trial", False) and planned_recipe is None:
+                    from .cpu_robot import recipe
+                    scenario.execution_recipe = recipe(scenario.seed)
                 if planned_recipe is not None:
-                    from workers.isaac.hazards import compile_hazard
+                    if planned_recipe.get("kind") == "object_positioning":
+                        from .cpu_robot import validate_recipe
+                        validate_recipe(planned_recipe, scenario.seed)
+                    else:
+                        from workers.isaac.hazards import compile_hazard
                     if scenario.structured_description.hazard_type != planned_recipe.get("kind"):
                         raise ValueError("Generated hazard type differs from the requested trial; no robot trial submitted")
                     scenario.execution_recipe = planned_recipe
-                    compile_hazard(scenario.model_dump(mode="json"))
+                    if planned_recipe.get("kind") != "object_positioning":
+                        compile_hazard(scenario.model_dump(mode="json"))
                     if scenario.generation_provenance:
                         scenario.generation_provenance["video_recipe_alignment"] = "illustrative_only; execution recipe independently parameterized"
                 scenario.organization_id = trial.organization_id
                 await self.store.put_scenario(scenario)
             await asyncio.sleep(self.delay)
             await self._status(trial, TrialStatus.SIMULATING, "Running robot policy trial")
-            measured = await self.simulator.run(scenario)
+            measured = await (self.simulator.run(scenario, trial) if getattr(self.simulator, "accepts_trial", False)
+                              else self.simulator.run(scenario))
             if getattr(self, "require_robot_evidence", False) and measured.evidence_origin != "simulator":
                 raise ExecutionBlocked(["Verified robot-policy telemetry; synthetic metrics are prohibited in live mode"])
             if getattr(self, "evidence_repository", None) is not None:

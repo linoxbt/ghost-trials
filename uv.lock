@@ -312,6 +312,9 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "mujoco" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "uvicorn", extra = ["standard"] },
@@ -324,11 +327,6 @@ dev = [
 ]
 models = [
     { name = "huggingface-hub" },
-]
-physics = [
-    { name = "mujoco" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 storage = [
     { name = "boto3" },
@@ -344,8 +342,8 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "huggingface-hub", marker = "extra == 'models'", specifier = ">=0.34,<2" },
     { name = "imageio", extras = ["ffmpeg"], marker = "extra == 'worker'", specifier = ">=2.37,<3" },
-    { name = "mujoco", marker = "extra == 'physics'", specifier = ">=3.3,<4" },
-    { name = "numpy", marker = "extra == 'physics'", specifier = ">=2,<3" },
+    { name = "mujoco", specifier = ">=3.3,<4" },
+    { name = "numpy", specifier = ">=2,<3" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4,<9" },

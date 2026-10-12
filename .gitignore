@@ -14,6 +14,7 @@ data/backups/
 deployment/production.env
 data/validation/
 data/experiments/
+data/cpu-validation/
 artifacts/generated/
 artifacts/*.png
 netlify-dist/

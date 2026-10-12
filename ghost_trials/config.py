@@ -8,14 +8,14 @@ from pydantic import Field
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    ghost_mode: str = "local"
+    ghost_mode: str = "cpu"
     ghost_data_path: Path = Path("data/state.json")
     ghost_artifact_root: Path = Path("artifacts/generated")
     ghost_pipeline_delay_seconds: float = 0.35
-    ghost_scenario_provider: str = "local"
-    ghost_simulator_provider: str = "local"
-    ghost_judge_provider: str = "local"
-    ghost_policy_name: str = "configured-g1-policy"
+    ghost_scenario_provider: str = "cpu"
+    ghost_simulator_provider: str = "mujoco_cpu"
+    ghost_judge_provider: str = "cpu"
+    ghost_policy_name: str = "gantry-push-v1"
     nebius_api_key: str | None = None
     nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
     nebius_super_model: str = "nvidia/nemotron-3-super-120b-a12b"
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     gr00t_checkpoint_digest: str | None = None
     gr00t_policy_host: str = "127.0.0.1"
     gr00t_policy_port: int = 5550
-    ghost_execution_backend: str = "gear_sonic_sim"
+    ghost_execution_backend: str = "mujoco_cpu"
     ghost_admin_token: str | None = None
     ghost_operator_token: str | None = None
     ghost_viewer_token: str | None = None
