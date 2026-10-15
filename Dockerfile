@@ -25,6 +25,5 @@ ENV GHOST_ARTIFACT_ROOT=/data/artifacts
 RUN install -d -m 0700 -o 10001 -g 10001 /data
 RUN chmod 0755 /app/deployment/start-api.sh
 USER 10001:10001
-VOLUME ["/data"]
 EXPOSE 8000
 CMD ["/app/deployment/start-api.sh"]
