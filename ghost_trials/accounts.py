@@ -1,6 +1,6 @@
 """Server-owned identities, organization membership and revocable opaque sessions.
 
-Privy verifies identities; clients never assign themselves roles or organizations.
+Identity providers verify users; clients never assign themselves roles or organizations.
 Application budgets bound admission, not external provider charges or idle VMs.
 """
 import hashlib
@@ -42,7 +42,9 @@ class Accounts:
         self.store, self.settings = store, settings
         self.jwks = None
         self.jwks_until = 0
-        self.login_configuration = {"methods": [], "verified": False}
+        self.dynamic_jwks = None
+        self.dynamic_jwks_until = 0
+        self.login_configuration = {"methods": [], "passkey_signup_enabled": False, "verified": False}
         self.login_configuration_until = 0
 
     async def login_methods(self):
@@ -58,9 +60,13 @@ class Accounts:
                 response.raise_for_status()
                 config = response.json()
             self.login_configuration = {"methods": [name for name, field in
-                (("email", "email_auth"), ("google", "google_oauth")) if config.get(field) is True], "verified": True}
+                (("email", "email_auth"), ("google", "google_oauth"), ("passkey", "passkey_auth"))
+                if config.get(field) is True],
+                "passkey_signup_enabled": config.get("passkey_auth") is True and
+                    config.get("passkeys_for_signup_enabled") is True,
+                "verified": True}
         except (httpx.HTTPError, ValueError):
-            self.login_configuration = {"methods": [], "verified": False}
+            self.login_configuration = {"methods": [], "passkey_signup_enabled": False, "verified": False}
         return self.login_configuration
 
     async def verification_key(self, token):
@@ -89,6 +95,33 @@ class Accounts:
         except httpx.HTTPError:
             raise HTTPException(503, "Identity provider verification temporarily unavailable")
 
+    async def dynamic_verification_key(self, token):
+        environment_id = self.settings.dynamic_environment_id
+        try:
+            uuid.UUID(environment_id or "")
+            header = jwt.get_unverified_header(token)
+            if header.get("alg") != "RS256" or not isinstance(header.get("kid"), str):
+                raise ValueError()
+            if self.dynamic_jwks_until < time.time():
+                # Fixed provider URL; neither the token nor request controls the key source.
+                url = f"https://app.dynamic.xyz/api/v0/sdk/{environment_id}/.well-known/jwks"
+                async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    keys = response.json()["keys"]
+                if not isinstance(keys, list) or len(keys) > 20:
+                    raise ValueError()
+                self.dynamic_jwks = keys
+                self.dynamic_jwks_until = time.time() + 300
+            for key in self.dynamic_jwks or []:
+                if key.get("kid") == header["kid"] and key.get("kty") == "RSA" and key.get("alg") in (None, "RS256"):
+                    return jwt.PyJWK.from_dict(key, algorithm="RS256").key
+            raise ValueError()
+        except (ValueError, KeyError, TypeError, jwt.PyJWTError):
+            raise HTTPException(401, "Unknown Dynamic signing key")
+        except httpx.HTTPError:
+            raise HTTPException(503, "Identity provider verification temporarily unavailable")
+
     def schema(self, db):
         db.executescript("""
             CREATE TABLE IF NOT EXISTS users(subject TEXT PRIMARY KEY,display_name TEXT NOT NULL,created REAL NOT NULL,disabled INTEGER NOT NULL DEFAULT 0);
@@ -113,8 +146,28 @@ class Accounts:
         except (jwt.PyJWTError, ValueError, TypeError):
             raise HTTPException(401, "Invalid or expired Privy access token")
 
-    def start_session(self, claims):
-        subject = claims["sub"]
+    def verify_dynamic(self, token, key):
+        environment_id = self.settings.dynamic_environment_id
+        audience = self.settings.dynamic_jwt_audience
+        if not environment_id or not audience or key is None:
+            raise HTTPException(503, "Dynamic verification is not configured")
+        try:
+            claims = jwt.decode(token, key, algorithms=["RS256"], audience=audience,
+                issuer=f"app.dynamic.xyz/{environment_id}",
+                options={"require": ["sub", "iss", "aud", "iat", "exp", "environment_id"]})
+            if claims["environment_id"] != environment_id:
+                raise ValueError("Wrong Dynamic environment")
+            subject = claims["sub"]
+            if not isinstance(subject, str) or str(uuid.UUID(subject)) != subject:
+                raise ValueError("Invalid Dynamic subject")
+            if "requiresAdditionalAuth" in claims.get("scopes", []):
+                raise ValueError("Additional authentication required")
+            return claims
+        except (jwt.PyJWTError, ValueError, TypeError):
+            raise HTTPException(401, "Invalid or expired Dynamic access token")
+
+    def start_session(self, claims, provider="privy"):
+        subject = f"dynamic:{claims['sub']}" if provider == "dynamic" else claims["sub"]
         raw = "usr_" + secrets.token_urlsafe(48)
         expires = min(float(claims["exp"]), time.time() + self.settings.ghost_privy_session_seconds)
         with self.store.connect() as db:
@@ -136,7 +189,7 @@ class Accounts:
             db.execute("DELETE FROM sessions WHERE expires<=?", (time.time(),))
             db.execute("INSERT INTO sessions VALUES(?,?,?,?,?)", (hashlib.sha256(raw.encode()).hexdigest(), subject,
                        membership["organization_id"], expires, time.time()))
-        principal = Principal(subject, membership["organization_id"], membership["role"])
+        principal = Principal(subject, membership["organization_id"], membership["role"], provider)
         self.audit(principal, "account_login")
         return raw, principal, expires
 
@@ -148,7 +201,12 @@ class Accounts:
             row = db.execute("SELECT s.subject,s.organization_id,m.role FROM sessions s JOIN users u ON u.subject=s.subject "
                 "JOIN members m ON m.subject=s.subject AND m.organization_id=s.organization_id "
                 "WHERE s.digest=? AND s.expires>? AND u.disabled=0", (hashlib.sha256(raw.encode()).hexdigest(), time.time())).fetchone()
-            return Principal(row["subject"], row["organization_id"], row["role"]) if row else None
+            if not row:
+                return None
+            kind = "dynamic" if row["subject"].startswith("dynamic:") else "privy"
+            if kind != self.settings.ghost_auth_provider:
+                return None
+            return Principal(row["subject"], row["organization_id"], row["role"], kind)
 
     def revoke(self, raw):
         with self.store.connect() as db:
@@ -156,7 +214,7 @@ class Accounts:
             db.execute("DELETE FROM sessions WHERE digest=?", (hashlib.sha256(raw.encode()).hexdigest(),))
 
     def profile(self, principal):
-        if principal.kind != "privy":
+        if principal.kind not in {"privy", "dynamic"}:
             return {"subject": principal.subject, "display_name": "Private team" if principal.kind == "role_token" else "Demo visitor", "organizations": []}
         with self.store.connect() as db:
             self.schema(db)

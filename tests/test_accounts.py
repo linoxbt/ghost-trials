@@ -1,19 +1,57 @@
 import asyncio
+import json
 import time
+import uuid
 from types import SimpleNamespace
 
 import httpx
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives import serialization
 from fastapi import HTTPException
 
 from ghost_trials.accounts import Accounts
 from ghost_trials.config import Settings
 from ghost_trials.durable import DurableStore
+from ghost_trials.security import AccessControl
 from ghost_trials.models import LiveEvent, TrialStatus
 from ghost_trials.private_setup import prepare_team
+
+
+@pytest.mark.asyncio
+async def test_privy_passkey_availability_tracks_provider_settings(tmp_path, monkeypatch):
+    settings=Settings(privy_app_id='testapp')
+    accounts=Accounts(DurableStore(tmp_path/'passkeys.sqlite3'), settings)
+    provider_config={'email_auth': True, 'google_oauth': True,
+        'passkey_auth': False, 'passkeys_for_signup_enabled': True}
+    original_client=httpx.AsyncClient
+    def handler(_request):
+        return httpx.Response(200,json=provider_config)
+    monkeypatch.setattr(httpx,'AsyncClient',lambda *args,**kwargs:
+        original_client(*args,transport=httpx.MockTransport(handler),**kwargs))
+    unavailable=await accounts.login_methods()
+    assert unavailable['methods']==['email','google']
+    assert unavailable['passkey_signup_enabled'] is False
+    provider_config['passkey_auth']=True
+    accounts.login_configuration_until=0
+    available=await accounts.login_methods()
+    assert available['methods']==['email','google','passkey']
+    assert available['passkey_signup_enabled'] is True
+
+
+@pytest.mark.asyncio
+async def test_auth_config_exposes_passkey_signup_readiness(identities,monkeypatch):
+    app,access,_,_,_=identities
+    async def login_methods():
+        return {'methods':['email','google','passkey'],
+            'passkey_signup_enabled':True,'verified':True}
+    monkeypatch.setattr(access.accounts,'login_methods',login_methods)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://test') as client:
+        config=(await client.get('/auth/config')).json()
+    assert config['auth_provider']=='privy'
+    assert config['methods']==['email','google','passkey']
+    assert config['passkey_signup_enabled'] is True
 
 
 def test_private_setup_preserves_credentials_and_disables_spending(tmp_path):
@@ -32,12 +70,86 @@ def test_private_setup_preserves_credentials_and_disables_spending(tmp_path):
         prepare_team(directory,'testappid','lab.example.com\nEVIL=true','operator@example.com')
 
 
+@pytest.mark.parametrize('overrides', [
+    {'ghost_customer_auth_required': False},
+    {'privy_app_id': None},
+    {'ghost_cookie_secure': False},
+    {'ghost_allowed_origins': ''},
+    {'ghost_allowed_origins': 'http://console.test'},
+    {'ghost_allowed_origins': 'https://console.test/path'},
+])
+def test_public_cpu_deployment_fails_closed_without_login_configuration(tmp_path, overrides):
+    config={'ghost_mode':'cpu','ghost_public_deployment':True,
+        'ghost_customer_auth_required':True,'privy_app_id':'testapp','ghost_cookie_secure':True,
+        'ghost_allowed_origins':'https://console.test'}
+    settings=Settings(**(config|overrides))
+    with pytest.raises(ValueError, match='Public deployment requires'):
+        AccessControl(settings,DurableStore(tmp_path/'state.sqlite3'))
+
+
+def test_public_cpu_deployment_accepts_private_api_configuration(tmp_path):
+    settings=Settings(ghost_mode='cpu',ghost_public_deployment=True,
+        ghost_customer_auth_required=True,privy_app_id='testapp',ghost_cookie_secure=True,
+        ghost_allowed_origins='https://console.test')
+    assert AccessControl(settings,DurableStore(tmp_path/'state.sqlite3')).enabled
+
+
+def test_public_dynamic_deployment_requires_environment_and_audience(tmp_path):
+    base=dict(ghost_mode='cpu',ghost_public_deployment=True,ghost_auth_provider='dynamic',
+        ghost_customer_auth_required=True,ghost_cookie_secure=True,
+        ghost_allowed_origins='https://console.test')
+    with pytest.raises(ValueError,match='individual sign-in'):
+        AccessControl(Settings(**base),DurableStore(tmp_path/'missing.sqlite3'))
+    environment=str(uuid.uuid4())
+    with pytest.raises(ValueError,match='JWT audience'):
+        AccessControl(Settings(**base,dynamic_environment_id=environment),DurableStore(tmp_path/'audience.sqlite3'))
+    with pytest.raises(ValueError,match='valid environment ID'):
+        AccessControl(Settings(**base,dynamic_environment_id='not-an-id',
+            dynamic_jwt_audience='https://console.test'),DurableStore(tmp_path/'invalid.sqlite3'))
+    with pytest.raises(ValueError,match='match an allowed frontend origin'):
+        AccessControl(Settings(**base,dynamic_environment_id=environment,
+            dynamic_jwt_audience='https://another.test'),DurableStore(tmp_path/'wrong-audience.sqlite3'))
+    assert AccessControl(Settings(**base,dynamic_environment_id=environment,
+        dynamic_jwt_audience='https://console.test'),DurableStore(tmp_path/'ready.sqlite3')).enabled
+
+
+@pytest.mark.asyncio
+async def test_dynamic_jwks_is_fetched_from_fixed_environment_and_cached(tmp_path,monkeypatch):
+    environment=str(uuid.uuid4())
+    settings=Settings(ghost_auth_provider='dynamic',dynamic_environment_id=environment,
+        dynamic_jwt_audience='https://console.test')
+    accounts=Accounts(DurableStore(tmp_path/'jwks.sqlite3'),settings)
+    private=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    jwk=json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
+    jwk.update(kid='only-key',alg='RS256')
+    requests=[]
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(200,json={'keys':[jwk]})
+    transport=httpx.MockTransport(handler)
+    original_client=httpx.AsyncClient
+    monkeypatch.setattr(httpx,'AsyncClient',lambda *args,**kwargs:
+        original_client(*args,transport=transport,**kwargs))
+    claims={'sub':str(uuid.uuid4()),'iss':f'app.dynamic.xyz/{environment}',
+        'aud':'https://console.test','environment_id':environment,
+        'iat':int(time.time()),'exp':int(time.time())+300}
+    token=jwt.encode(claims,private,algorithm='RS256',headers={'kid':'only-key'})
+    key=await accounts.dynamic_verification_key(token)
+    assert accounts.verify_dynamic(token,key)['sub']==claims['sub']
+    assert await accounts.dynamic_verification_key(token)==key
+    assert requests==[f'https://app.dynamic.xyz/api/v0/sdk/{environment}/.well-known/jwks']
+    with pytest.raises(HTTPException) as error:
+        await accounts.dynamic_verification_key(jwt.encode(claims,private,algorithm='RS256',headers={'kid':'unknown'}))
+    assert error.value.status_code==401
+
+
 @pytest.fixture
 def identities(monkeypatch,tmp_path):
     from ghost_trials.app import app,settings,access,store,pipeline
     key=ec.generate_private_key(ec.SECP256R1())
     public=key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo).decode()
     for name,value in {'privy_app_id':'testapp','privy_verification_key':public,'ghost_cookie_secure':False,
+        'ghost_auth_provider':'privy',
         'ghost_allowed_origins':'https://console.test','ghost_public_signup_enabled':True,
         'ghost_live_execution_enabled':False}.items():
         monkeypatch.setattr(settings,name,value)
@@ -65,20 +177,72 @@ async def signin(client,token):
 
 @pytest.mark.asyncio
 async def test_verified_identity_and_revocable_session(identities):
-    app,access,store,_,token=identities
+    app,access,store,settings,token=identities
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://test') as client:
+        assert (await client.get('/app/')).status_code==303
+        assert (await client.get('/app/')).headers['location']=='/auth/login'
+        assert (await client.get('/hunts')).status_code==401
+        assert (await client.post('/hunts',json={'objective': {'task':'walk forward 1m',
+            'environment':'configured SONIC MuJoCo scene','hazard_type':'falling_object'},
+            'max_trials':3,'strategy':'adaptive'},headers={'Origin':'https://console.test'})).status_code==401
         for invalid in [token(aud='other'),token(exp=int(time.time())-1),token(iss='attacker'),token(sub='admin')]:
             assert (await client.post('/auth/privy/session',json={'access_token':invalid},headers={'Origin':'https://console.test'})).status_code==401
         org=await signin(client,token())
+        assert (await client.get('/app/')).status_code==200
         me=(await client.get('/auth/me')).json()
         assert me['organization_id']==org and me['authentication_kind']=='privy'
         assert (await client.get('/account')).json()['subject']=='did:privy:alice'
         stolen=client.cookies['ghost_session']
         with store.connect() as db:
             assert db.execute('SELECT digest FROM sessions').fetchone()[0]!=stolen
+        settings.ghost_auth_provider='dynamic'
+        assert (await client.get('/trials')).status_code==401
+        settings.ghost_auth_provider='privy'
         assert (await client.post('/auth/logout',headers={'Origin':'https://console.test'})).status_code==200
         client.cookies.set('ghost_session',stolen)
         assert (await client.get('/trials')).status_code==401
+
+
+@pytest.mark.asyncio
+async def test_dynamic_signin_executes_server_verified_account_session(identities,monkeypatch):
+    app,access,store,settings,_=identities
+    environment=str(uuid.uuid4())
+    subject=str(uuid.uuid4())
+    key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    public=key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+    monkeypatch.setattr(settings,'ghost_auth_provider','dynamic')
+    monkeypatch.setattr(settings,'dynamic_environment_id',environment)
+    monkeypatch.setattr(settings,'dynamic_jwt_audience','https://console.test')
+    async def verification_key(_token):
+        return public
+    monkeypatch.setattr(access.accounts,'dynamic_verification_key',verification_key)
+    def token(**changes):
+        claims={'sub':subject,'iss':f'app.dynamic.xyz/{environment}','aud':'https://console.test',
+            'environment_id':environment,'iat':int(time.time()),'exp':int(time.time())+3600}
+        claims.update(changes)
+        return jwt.encode(claims,key,algorithm='RS256')
+    origin={'Origin':'https://console.test'}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://test') as client:
+        configuration=(await client.get('/auth/config')).json()
+        assert configuration['auth_provider']=='dynamic'
+        assert configuration['dynamic_environment_id']==environment
+        assert configuration['app_id'] is None
+        assert (await client.get('/hunts')).status_code==401
+        for invalid in (token(aud='https://attacker.test'),token(environment_id=str(uuid.uuid4())),
+                        token(scopes=['requiresAdditionalAuth']),token(exp=int(time.time())-1)):
+            assert (await client.post('/auth/dynamic/session',json={'access_token':invalid},headers=origin)).status_code==401
+        assert (await client.post('/auth/privy/session',json={'access_token':token()},headers=origin)).status_code==404
+        response=await client.post('/auth/dynamic/session',json={'access_token':token()},headers=origin)
+        assert response.status_code==200,response.text
+        assert 'HttpOnly' in response.headers['set-cookie']
+        profile=(await client.get('/account')).json()
+        assert profile['authentication_kind']=='dynamic'
+        assert profile['subject']==f'dynamic:{subject}'
+        assert (await client.get('/app/')).status_code==200
+        assert (await client.get('/hunts')).status_code==200
+        assert (await client.post('/organizations',json={'name':'Robot Team'},headers=origin)).status_code==201
+        assert (await client.post('/auth/logout',headers=origin)).status_code==200
+        assert (await client.get('/hunts')).status_code==401
 
 
 @pytest.mark.asyncio

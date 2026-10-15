@@ -5,6 +5,8 @@ import hmac
 import json
 import time
 import re
+import uuid
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
@@ -18,14 +20,35 @@ class AccessControl:
         self.tokens = {role: token for role, token in {
             "admin": settings.ghost_admin_token, "operator": settings.ghost_operator_token,
             "viewer": settings.ghost_viewer_token}.items() if token}
-        self.enabled = bool(self.tokens or settings.privy_app_id or settings.ghost_customer_auth_required)
+        identity_configured = settings.privy_app_id if settings.ghost_auth_provider == "privy" else settings.dynamic_environment_id
+        self.enabled = bool(self.tokens or identity_configured or settings.ghost_customer_auth_required)
         if self.tokens and (any(len(token) < 32 for token in self.tokens.values()) or len(set(self.tokens.values())) != len(self.tokens)):
             raise ValueError("Role tokens must be distinct and at least 32 characters")
+        if settings.ghost_public_deployment:
+            if not settings.ghost_customer_auth_required or not identity_configured:
+                raise ValueError("Public deployment requires individual sign-in")
+            if settings.ghost_auth_provider == "dynamic" and not settings.dynamic_jwt_audience:
+                raise ValueError("Public Dynamic deployment requires a JWT audience")
+            if not settings.ghost_cookie_secure:
+                raise ValueError("Public deployment requires secure session cookies")
+            origins = [item.strip() for item in settings.ghost_allowed_origins.split(",") if item.strip()]
+            if not origins or any((parts := urlsplit(item)).scheme != "https" or not parts.netloc
+                                  or parts.path or parts.query or parts.fragment or parts.username or parts.password
+                                  for item in origins):
+                raise ValueError("Public deployment requires exact HTTPS allowed origins")
+            if settings.ghost_auth_provider == "dynamic":
+                try:
+                    if str(uuid.UUID(settings.dynamic_environment_id)) != settings.dynamic_environment_id:
+                        raise ValueError()
+                except (TypeError, ValueError):
+                    raise ValueError("Public Dynamic deployment requires a valid environment ID") from None
+                if settings.dynamic_jwt_audience not in origins:
+                    raise ValueError("Public Dynamic JWT audience must match an allowed frontend origin")
         if settings.ghost_mode == "production":
             if not settings.ghost_cookie_secure:
                 raise ValueError("Production requires secure session cookies")
-            if not settings.ghost_admin_token and not settings.privy_app_id:
-                raise ValueError("Production requires GHOST_ADMIN_TOKEN of at least 32 characters")
+            if not settings.ghost_admin_token and not identity_configured:
+                raise ValueError("Production requires an identity provider or GHOST_ADMIN_TOKEN of at least 32 characters")
             if not settings.ghost_allowed_origins:
                 raise ValueError("Production requires explicit GHOST_ALLOWED_ORIGINS")
 
@@ -58,7 +81,7 @@ class AccessControl:
         principal = getattr(connection.state, "principal", None)
         if principal:
             # Reload membership to invalidate removed members and changed roles.
-            if principal.kind == "privy":
+            if principal.kind in {"privy", "dynamic"}:
                 current = self.accounts.resolve(connection.cookies.get("ghost_session", ""))
                 return current.role if current else None
             return principal.role
@@ -81,14 +104,14 @@ class AccessControl:
 
     def require_platform(self, request):
         principal = self.principal(request)
-        if not principal or principal.kind == "privy":
+        if not principal or principal.kind in {"privy", "dynamic"}:
             raise HTTPException(403, "Platform operator credentials required")
         return self.require(request)
 
     def require_account(self, request, roles=("admin", "operator", "viewer")):
         principal = self.principal(request)
-        if not principal or principal.kind != "privy":
-            raise HTTPException(401, "Individual Privy sign-in required")
+        if not principal or principal.kind not in {"privy", "dynamic"}:
+            raise HTTPException(401, "Individual sign-in required")
         if self.role(request) not in roles:
             raise HTTPException(403, "Workspace role does not permit this action")
         return principal
@@ -109,7 +132,7 @@ class AccessControl:
 
     async def middleware(self, request, call_next):
         path = request.url.path
-        public = path in {"/", "/docs", "/docs/", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/invite"} or path.startswith("/assets/") or path.startswith("/app")
+        public = path in {"/", "/docs", "/docs/", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite"} or path.startswith("/assets/") or path.startswith("/app")
         request.state.principal = self.principal(request)
         if self.enabled and not public:
             role = self.role(request)
@@ -124,7 +147,7 @@ class AccessControl:
             principal = request.state.principal
             physical_chunk = bool(request.method == "PUT" and self.enabled and principal and re.fullmatch(
                 r"/physical/sessions/phy_[a-f0-9]{24}/artifacts/(response\.mp4|telemetry\.jsonl|capture\.json)", path))
-            key = ("recording-upload:" if physical_chunk else "mutation:") + (principal.subject if principal and principal.kind == "privy" else self.role(request) or "anonymous")
+            key = ("recording-upload:" if physical_chunk else "mutation:") + (principal.subject if principal and principal.kind in {"privy", "dynamic"} else self.role(request) or "anonymous")
             limit = self.settings.ghost_physical_max_chunks_per_minute if physical_chunk else self.settings.ghost_max_requests_per_minute
             if not self.store.rate_allowed(key, limit):
                 return JSONResponse({"detail": "Rate limit exceeded"}, 429, headers={"Retry-After": "60"})

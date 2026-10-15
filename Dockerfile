@@ -16,13 +16,15 @@ COPY workers ./workers
 COPY static ./static
 COPY --from=auth-ui /ui/static/auth ./static/auth
 COPY deployment/logging.json ./deployment/logging.json
+COPY deployment/start-api.sh ./deployment/start-api.sh
 RUN uv sync --frozen --no-dev --extra storage
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV GHOST_DATA_PATH=/data/state.json
 ENV GHOST_ARTIFACT_ROOT=/data/artifacts
 RUN install -d -m 0700 -o 10001 -g 10001 /data
+RUN chmod 0755 /app/deployment/start-api.sh
 USER 10001:10001
 VOLUME ["/data"]
 EXPOSE 8000
-CMD ["uvicorn", "ghost_trials.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/deployment/start-api.sh"]

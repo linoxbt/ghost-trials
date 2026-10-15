@@ -220,15 +220,21 @@ class BudgetRequest(BaseModel):
 
 @app.get("/auth/config")
 async def auth_configuration():
-    configured = await access.accounts.login_methods() if settings.privy_app_id else {"methods": [], "verified": False}
-    return {"app_id": settings.privy_app_id, "client_id": settings.privy_client_id,
-            "privy_configured": bool(settings.privy_app_id),
+    configured = await access.accounts.login_methods() if settings.ghost_auth_provider == "privy" and settings.privy_app_id else {"methods": [], "passkey_signup_enabled": False, "verified": False}
+    return {"app_id": settings.privy_app_id if settings.ghost_auth_provider == "privy" else None,
+            "client_id": settings.privy_client_id if settings.ghost_auth_provider == "privy" else None,
+            "privy_configured": settings.ghost_auth_provider == "privy" and bool(settings.privy_app_id),
+            "auth_provider": settings.ghost_auth_provider,
+            "dynamic_environment_id": settings.dynamic_environment_id if settings.ghost_auth_provider == "dynamic" else None,
             "private_team_enabled": bool(access.tokens), "demo_enabled": not access.enabled,
-            "methods": configured["methods"], "provider_configuration_verified": configured["verified"]}
+            "methods": configured["methods"], "passkey_signup_enabled": configured["passkey_signup_enabled"],
+            "provider_configuration_verified": configured["verified"]}
 
 
 @app.post("/auth/privy/session")
 async def privy_session(body: PrivySessionRequest, request: Request):
+    if settings.ghost_auth_provider != "privy":
+        raise HTTPException(404, "Privy sign-in is not active")
     if not access.origin_allowed(request):
         raise HTTPException(403, "Untrusted request origin")
     if not store.rate_allowed("privy_login", 30):
@@ -236,6 +242,24 @@ async def privy_session(body: PrivySessionRequest, request: Request):
     key = await access.accounts.verification_key(body.access_token)
     claims = access.accounts.verify(body.access_token, key)
     raw, principal, expires = access.accounts.start_session(claims)
+    response = JSONResponse({"authenticated": True, "organization_id": principal.organization_id})
+    response.set_cookie("ghost_session", raw, httponly=True, secure=settings.ghost_cookie_secure,
+                        samesite="lax", max_age=max(0, int(expires - time.time())), path="/")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/auth/dynamic/session")
+async def dynamic_session(body: PrivySessionRequest, request: Request):
+    if settings.ghost_auth_provider != "dynamic" or not settings.dynamic_environment_id:
+        raise HTTPException(404, "Dynamic sign-in is not active")
+    if not access.origin_allowed(request):
+        raise HTTPException(403, "Untrusted request origin")
+    if not store.rate_allowed("dynamic_login", 30):
+        raise HTTPException(429, "Too many sign-in attempts")
+    key = await access.accounts.dynamic_verification_key(body.access_token)
+    claims = access.accounts.verify_dynamic(body.access_token, key)
+    raw, principal, expires = access.accounts.start_session(claims, provider="dynamic")
     response = JSONResponse({"authenticated": True, "organization_id": principal.organization_id})
     response.set_cookie("ghost_session", raw, httponly=True, secure=settings.ghost_cookie_secure,
                         samesite="lax", max_age=max(0, int(expires - time.time())), path="/")
@@ -875,7 +899,9 @@ async def landing():
 
 @app.get("/app", response_class=HTMLResponse)
 @app.get("/app/", response_class=HTMLResponse)
-async def dashboard():
+async def dashboard(request: Request):
+    if access.enabled and not access.principal(request):
+        return RedirectResponse("/auth/login", status_code=303)
     return (ROOT / "static" / "index.html").read_text()
 
 
