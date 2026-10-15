@@ -152,7 +152,7 @@ This is an experimental product metric, not a safety standard or a calibrated pr
 
 See [evaluation methodology and remaining validation](docs/EVALUATION.md), [free-credit steps](docs/FREE_CREDITS.md), and [execution handoff](docs/EXECUTION_HANDOFF.md).
 
-For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. The public development preview stays synthetic until an authorized operator configures and validates the external stack.
+For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. Local CPU MuJoCo execution is real simulation; the optional G1/SONIC GPU path still requires its own acceptance run. A hosted preview has no live backend unless a stable HTTPS CPU service is deployed and connected.
 
 For the hosted frontend and backend proxy configuration, see [Netlify deployment](docs/NETLIFY.md). Netlify needs a public HTTPS FastAPI origin; model and GPU credentials stay on the backend services.
 
@@ -164,7 +164,7 @@ MIT
 
 See [private deployment and readiness gates](docs/PRODUCTION_READINESS.md) for
 authentication, persistent jobs/evidence, backups, monitoring and deployment.
-This implementation supports individual Privy email/Google identities and
+This implementation supports individual Privy or Dynamic.xyz email/Google identities and
 organization-isolated workspaces in one API process. Team invitations, role
 changes, session revocation, tenant-filtered media/live updates, and atomic
 execution-admission budgets are implemented. See [account setup](docs/AUTHENTICATION.md).

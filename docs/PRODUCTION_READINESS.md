@@ -11,7 +11,7 @@ adapters remain fail-closed when required resources are absent.
 | --- | --- | --- |
 | Real execution | Existing Cosmos and G1 adapters; read-only `/ops/providers`; checkpoint checks; worker acceptance command; mandatory evidence capture and recomputation before scoring | Authorized model endpoints, GPU allocation, compatible fine-tuned weights, and an actual full run |
 | Stable hosting | `deployment/secure.compose.yaml`, restart policies, persistent volumes, Caddy HTTPS, Netlify auth/ops proxy routes | Permanent domain/DNS, host, original Netlify project access and resolved usage limit |
-| Access and cost exposure | Privy email/Google identities, hashed revocable sessions, private workspace invitations and roles, tenant-filtered records/media/live events, operator-only infrastructure controls, atomic org/platform admission reservations, default-off paid execution | Enable methods in Privy; provider-side budget enforcement and VM shutdown policy. Admission reservations are not actual billing or a monetary cap |
+| Access and cost exposure | Privy or Dynamic.xyz email/Google identities, hashed revocable sessions, private workspace invitations and roles, tenant-filtered records/media/live events, operator-only infrastructure controls, atomic org/platform admission reservations, default-off paid execution | Enable methods in the selected identity provider; provider-side budget enforcement and VM shutdown policy. Admission reservations are not actual billing or a monetary cap |
 | Durable data/jobs | SQLite WAL transactions, atomic acceptance/idempotency, persisted serialized queue, exclusive process lease, queued cancellation, crash recovery, private S3 replica option, bounded backup/restore | Off-host backup destination, retention configuration, restore rehearsal on the deployment host |
 | Validation | Independent metric recomputation; full video decoding; reference-label audit; minimum hazard/seed coverage; fail-closed promotion CLI | Real captured evidence, independent experts, calibrated metrics, matched policy baselines and transfer validation |
 | Operations | Private status/audit/readiness endpoints, request IDs and redacted logs, polling/webhook monitor, locked dependencies, CI and manual frontend deployment workflow | Alert destination, deployment secrets, operational ownership, production load/failure testing |
@@ -27,13 +27,13 @@ This creates `deployment/private/access.env` with distinct role tokens, permissi
 0600, and does not print them or overwrite existing tokens. Use the admin token
 from that private file to sign in at `/auth/login`. Distribute viewer/operator
 tokens only through a secure channel. These are shared platform/legacy roles,
-not individual accounts. Customers authenticate through Privy and receive separate
+not individual accounts. Customers authenticate through the selected provider and receive separate
 organization-scoped workspaces; organization admins never gain platform-operator
 access. See [AUTHENTICATION.md](AUTHENTICATION.md) for setup and membership rules.
 Replace a compromised token in the private file and restart the API and monitor;
 existing cookies tied to that token become invalid. Changing the admin token
 invalidates every signed legacy session. Legacy token logout removes the browser
-cookie, not a stolen copy. Individual Privy sessions are persisted as hashes and
+cookie, not a stolen copy. Individual provider sessions are persisted as hashes and
 revoked server-side on logout/member removal. Use short session lifetimes.
 
 ## 2. Configure a permanent deployment

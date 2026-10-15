@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -62,7 +63,11 @@ class Settings(BaseSettings):
     privy_app_id: str | None = None
     privy_client_id: str | None = None
     privy_verification_key: str | None = None
+    ghost_auth_provider: Literal["privy", "dynamic"] = "privy"
+    dynamic_environment_id: str | None = None
+    dynamic_jwt_audience: str | None = None
     ghost_customer_auth_required: bool = False
+    ghost_public_deployment: bool = False
     ghost_public_signup_enabled: bool = True
     ghost_privy_session_seconds: int = Field(default=3600, ge=60, le=86400)
     ghost_platform_budget_cents: int = Field(default=0, ge=0)

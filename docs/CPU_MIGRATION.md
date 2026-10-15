@@ -33,6 +33,54 @@ uv run uvicorn ghost_trials.app:app --host 127.0.0.1 --port 8000
 
 For an existing checkout whose private `.env` still selects GPU providers, use `uv run python -m scripts.run_cpu` to override only the execution-mode variables without changing or printing secrets.
 
+### Public CPU backend
+
+The Netlify site is a static frontend. It needs a continuously running FastAPI
+backend at a stable HTTPS origin; an ephemeral `trycloudflare.com` quick tunnel is
+not a deployment. The root `Dockerfile` and `railway.json` are ready for a
+single-replica Railway CPU service, but adding that service, its persistent
+volume, and its public domain requires access to the owner's Railway account
+and can incur charges. No cloud resources are created by this repository.
+
+Before exposing the service, attach persistent storage at `/data` and configure
+the backend with these variables (along with an owner-controlled Railway
+spending limit):
+
+```dotenv
+GHOST_MODE=cpu
+GHOST_SCENARIO_PROVIDER=cpu
+GHOST_SIMULATOR_PROVIDER=mujoco_cpu
+GHOST_JUDGE_PROVIDER=cpu
+GHOST_EXECUTION_BACKEND=mujoco_cpu
+GHOST_PUBLIC_DEPLOYMENT=true
+GHOST_CUSTOMER_AUTH_REQUIRED=true
+GHOST_AUTH_PROVIDER=dynamic
+DYNAMIC_ENVIRONMENT_ID=<Dynamic environment UUID>
+DYNAMIC_JWT_AUDIENCE=https://ghost-trials.netlify.app
+GHOST_COOKIE_SECURE=true
+GHOST_ALLOWED_ORIGINS=https://ghost-trials.netlify.app,https://<backend-domain>
+GHOST_DATA_PATH=/data/state.sqlite3
+GHOST_ARTIFACT_ROOT=/data/artifacts
+RAILWAY_RUN_UID=0
+```
+
+Enable email and Google in the Dynamic dashboard, allow the Netlify frontend
+origin, and set that same origin as the Dynamic JWT audience. The application
+also supports the existing Privy integration: use `GHOST_AUTH_PROVIDER=privy`
+and `PRIVY_APP_ID` instead. Do not set a provider ID for an app you do not own.
+The backend refuses to start with `GHOST_PUBLIC_DEPLOYMENT=true` if individual
+sign-in, secure cookies, or exact HTTPS origins are missing. Railway volumes
+are initially root-owned: set `RAILWAY_RUN_UID=0` for the service. The container
+entrypoint assigns its dedicated `/data` mount, then runs FastAPI as UID 10001.
+Keep exactly one replica because the state store uses SQLite and an exclusive
+process lease. Back up the volume off-host.
+
+Only after `/health` returns 200 from the permanent backend, set the Netlify
+production build variable `GHOST_BACKEND_ORIGIN` to that origin and redeploy.
+Check that Netlify `/health` returns 200, unauthenticated `/trials` returns 401,
+and an authenticated user can start and inspect a CPU Hunt. A Git push alone
+does not invoke the repository's manual frontend deployment workflow.
+
 The active CPU settings are `GHOST_MODE=cpu`, `GHOST_SCENARIO_PROVIDER=cpu`, `GHOST_SIMULATOR_PROVIDER=mujoco_cpu`, `GHOST_JUDGE_PROVIDER=cpu`, `GHOST_EXECUTION_BACKEND=mujoco_cpu`, and `GHOST_POLICY_NAME=gantry-push-v1`. For a CPU-only Docker host, `docker compose up --build` uses these defaults if `.env` is absent. If an existing `.env` selects production/GPU providers, set the CPU values explicitly in the deployment environment; never publish keys in frontend variables. Persistent data and artifacts should be mounted or backed up. Protect public deployments with the existing authentication and HTTPS reverse proxy; a development server on port 8000 must not be exposed directly.
 
 ## Evidence and measurements
@@ -52,4 +100,4 @@ uv run pytest -q
 
 ## Optional integrations and limits
 
-The existing Cosmos video, Nemotron judge, SONIC/Isaac worker, hardware capture, Privy authentication, and deployment paths remain available. They are not invoked by the CPU path. The old G1 policy action spaces are not interchangeable with this gantry controller. CPU mode does not create Cosmos video or Nemotron commentary. It is a physically simulated manipulation benchmark, not a hardware trial, a G1 benchmark, or a safety certification. Neural checkpoints outside the declared JSON observation/action contract remain unsupported.
+The existing Cosmos video, Nemotron judge, SONIC/Isaac worker, hardware capture, Privy/Dynamic authentication, and deployment paths remain available. They are not invoked by the CPU path. The old G1 policy action spaces are not interchangeable with this gantry controller. CPU mode does not create Cosmos video or Nemotron commentary. It is a physically simulated manipulation benchmark, not a hardware trial, a G1 benchmark, or a safety certification. Neural checkpoints outside the declared JSON observation/action contract remain unsupported.
