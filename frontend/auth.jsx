@@ -41,22 +41,23 @@ function SignIn({methods,passkeySignupEnabled}){
       location.replace('/app/');
     }catch(err){setError(err.message);setBusy(false);}
   }
-  return <><p className="login-lead">Your evaluation lab. Your team. Your evidence.</p>
+  const emailEnabled=methods.includes('email');
+  const googleEnabled=methods.includes('google');
+  return <><p className="login-lead">Continue to your private evaluation workspace.</p>
     {authenticated?<><button className="auth-primary" disabled={busy||!ready} onClick={enter}>{busy?'Opening your workspace…':'Continue to workspace →'}</button>
-      <button className="auth-secondary" disabled={!ready||busy||!passkeyEnabled} onClick={()=>void beginPasskey(()=>linkPasskey({name:'Ghost Trials'}))}>🔑 Create passkey for this account</button>
-      <button className="auth-secondary" disabled={busy} onClick={()=>logout()}>Use a different account</button></>:
-      <><button className="auth-primary" disabled={!ready||busy||!methods.includes('email')} onClick={()=>{setError('');login({loginMethods:['email']});}}><span aria-hidden="true">✉</span> Continue with email</button>
-      <div className="auth-divider"><span>or</span></div><button className="auth-secondary" disabled={!ready||busy||!methods.includes('google')} onClick={()=>{setError('');login({loginMethods:['google']});}}><span className="google-symbol" aria-hidden="true">G</span> Continue with Google</button>
-      <button className="auth-secondary" disabled={!ready||busy||passkeyBusy||!passkeyEnabled} onClick={()=>void beginPasskey(loginWithPasskey)}>🔑 Sign in with passkey</button>
-      <button className="auth-secondary" disabled={!ready||busy||passkeyBusy||!passkeySignupEnabled} onClick={()=>void beginPasskey(signupWithPasskey)}>Create account with passkey</button>
-      <p className="auth-note auth-passkey-help">Already have an email or Google account? Sign in first, then use “Create passkey for this account” to keep the same workspace.</p>
-      {!methods.includes('google')&&<p className="auth-note">Google sign-in is awaiting activation by this app’s administrator in Privy.</p>}</>}
-    {!passkeyEnabled&&<p className="auth-note">Passkeys are awaiting activation by this app’s administrator in Privy.</p>}
-    {passkeyEnabled&&!authenticated&&!passkeySignupEnabled&&<p className="auth-note">New-account passkeys are not enabled in Privy yet. Sign in with email or Google to add a passkey to your account.</p>}
+      {passkeyEnabled&&<button className="auth-secondary" disabled={!ready||busy} onClick={()=>void beginPasskey(()=>linkPasskey({name:'Ghost Trials'}))}>Create a passkey for this account</button>}
+      <button className="auth-text-button" disabled={busy} onClick={()=>logout()}>Use a different account</button></>:
+      <div className="auth-methods">
+        {emailEnabled&&<button className="auth-primary" disabled={!ready||busy} onClick={()=>{setError('');login({loginMethods:['email']});}}><span className="auth-method-icon" aria-hidden="true">✉</span><span>Continue with email</span><span className="auth-method-arrow" aria-hidden="true">↗</span></button>}
+        {googleEnabled&&<button className={emailEnabled?'auth-secondary':'auth-primary'} disabled={!ready||busy} onClick={()=>{setError('');login({loginMethods:['google']});}}><span className="google-symbol" aria-hidden="true">G</span><span>Continue with Google</span><span className="auth-method-arrow" aria-hidden="true">↗</span></button>}
+        {passkeyEnabled&&<button className={emailEnabled||googleEnabled?'auth-secondary':'auth-primary'} disabled={!ready||busy||passkeyBusy} onClick={()=>void beginPasskey(loginWithPasskey)}><span className="auth-method-icon" aria-hidden="true">⌁</span><span>Sign in with passkey</span><span className="auth-method-arrow" aria-hidden="true">↗</span></button>}
+        {passkeyEnabled&&passkeySignupEnabled&&<button className="auth-text-button" disabled={!ready||busy||passkeyBusy} onClick={()=>void beginPasskey(signupWithPasskey)}>New here? Create a passkey account</button>}
+        {!methods.length&&<p className="auth-error" role="alert">Sign-in is temporarily unavailable. Please try again later.</p>}
+      </div>}
     {passkeyNotice&&<p className="auth-success" role="status">{passkeyNotice}</p>}
     {error&&<p className="auth-error" role="alert">{error}</p>}
     {!ready&&<p role="status">Connecting to secure sign-in…</p>}
-    <p className="auth-note">{location.pathname==='/auth/invite'?'Sign in, then continue to accept your private team invitation.':'New accounts get an isolated workspace. Paid execution is disabled until an operator assigns a budget.'}</p></>;
+    <p className="auth-note">{location.pathname==='/auth/invite'?'Continue to accept your team invitation.':'New to Ghost Trials? Continue with an available method to create your account.'}</p></>;
 }
 async function start(){
   const root=createRoot(document.getElementById('privy-login'));
@@ -70,10 +71,12 @@ async function start(){
       renderDynamic(root,config,api);
       return;
     }
-    if(!config.privy_configured){root.render(<p className="auth-note">Customer sign-in is not configured on this deployment. No credentials are collected here.</p>);return;}
+    if(!config.privy_configured){root.render(<p className="auth-error" role="alert">Sign-in is not configured on this deployment. No credentials are collected here.</p>);return;}
+    const methods=Array.isArray(config.methods)?config.methods.filter(method=>['email','google','passkey'].includes(method)):[];
+    if(!methods.length){root.render(<p className="auth-error" role="alert">Sign-in is temporarily unavailable. Please try again later.</p>);return;}
     root.render(<PrivyProvider appId={config.app_id} {...(config.client_id?{clientId:config.client_id}:{})}
-      config={{loginMethods:['email','google','passkey'],appearance:{theme:'dark',accentColor:'#FF7A32',logo:'/assets/ghost-mark.svg',showWalletLoginFirst:false},
-      embeddedWallets:{ethereum:{createOnLogin:'off'},solana:{createOnLogin:'off'}}}}><SignIn methods={config.methods} passkeySignupEnabled={config.passkey_signup_enabled}/></PrivyProvider>);
+      config={{loginMethods:methods,appearance:{theme:'light',accentColor:'#DB511B',logo:'/assets/ghost-mark.svg',showWalletLoginFirst:false},
+      embeddedWallets:{ethereum:{createOnLogin:'off'},solana:{createOnLogin:'off'}}}}><SignIn methods={methods} passkeySignupEnabled={config.passkey_signup_enabled===true}/></PrivyProvider>);
   }catch(error){root.render(<p className="auth-error" role="alert">{error.message}</p>);}
 }
 start();
