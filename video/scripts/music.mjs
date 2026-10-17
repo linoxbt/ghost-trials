@@ -1,4 +1,4 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {key} from './env.mjs';
 import {record} from './status.mjs';
@@ -7,8 +7,10 @@ const output = 'public/audio/music.mp3';
 if (existsSync(output) && process.env.FORCE !== '1') { record('music', 'written: cached'); console.log('Music: cached'); process.exit(0); }
 const timing = JSON.parse(readFileSync('src/timing.json', 'utf8'));
 const musicLengthMs = Math.max(20000, Math.min(120000, Math.round(timing.totalFrames / 30 * 1000)));
+const knownPaid = existsSync('.cache/music.json') && JSON.parse(readFileSync('.cache/music.json', 'utf8')).musicApiStatus === 402;
 let response;
-try {
+if (knownPaid) response = {status: 402, ok: false};
+else try {
   response = await fetch('https://api.elevenlabs.io/v1/music', {
     method: 'POST', headers: {'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg, application/json'},
     body: JSON.stringify({prompt: 'very quiet felt piano, soft low pulse, no drums, no vocals, cold documentary', music_length_ms: musicLengthMs, force_instrumental: true}),
@@ -59,9 +61,13 @@ for (const [name, text] of beds) {
 const seconds = musicLengthMs / 1000;
 const finalBedDuration = Math.max(26, seconds - 48);
 const fadeOut = Math.max(0, seconds - 2);
-const filter = `[0:a]atrim=0:26,asetpts=PTS-STARTPTS[a];[1:a]atrim=0:26,asetpts=PTS-STARTPTS[b];[2:a]atrim=0:${finalBedDuration},asetpts=PTS-STARTPTS[c];[a][b]acrossfade=d=2[ab];[ab][c]acrossfade=d=2,atrim=0:${seconds},afade=t=in:st=0:d=1.5,afade=t=out:st=${fadeOut}:d=2,volume=0.55[out]`;
+const filter = `[0:a]atrim=0:26,asetpts=PTS-STARTPTS[a];[1:a]atrim=0:26,asetpts=PTS-STARTPTS[b];[2:a]atrim=0:${finalBedDuration},asetpts=PTS-STARTPTS[c];[a][b]acrossfade=d=2[ab];[ab][c]acrossfade=d=2,atrim=0:${seconds},afade=t=in:st=0:d=1.5,afade=t=out:st=${fadeOut}:d=2[out]`;
 const result = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', inputs[0], '-i', inputs[1], '-stream_loop', '-1', '-i', inputs[2], '-filter_complex', filter, '-map', '[out]', '-ar', '44100', '-ac', '2', '-b:a', '192k', output], {stdio: 'inherit'});
 if (result.status !== 0) throw new Error('Music bed assembly failed');
+const normalized = '.cache/music/normalized.mp3';
+const mastering = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', output, '-af', 'loudnorm=I=-20:TP=-3:LRA=10', '-ar', '44100', '-ac', '2', '-b:a', '192k', normalized], {stdio: 'inherit'});
+if (mastering.status !== 0) throw new Error('Music normalization failed');
+renameSync(normalized, output);
 writeFileSync('.cache/music.json', JSON.stringify({source: 'sound-generation-stitched', seconds, musicApiStatus: 402}, null, 2) + '\n');
 record('music', 'written: sound-generation fallback (Music API HTTP 402)');
 console.log('Music fallback written');

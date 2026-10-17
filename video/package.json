@@ -37,6 +37,7 @@
     "timing": "node scripts/timing.mjs",
     "music": "node scripts/music.mjs",
     "sfx": "node scripts/sfx.mjs",
+    "design-sfx": "node scripts/design-sfx.mjs",
     "audio": "npm run vo && npm run music && npm run sfx && npm run timing",
     "draft": "npm run timing && remotion render GhostTrials out/draft.mp4 --scale 0.5 --crf 28 --concurrency 1",
     "render": "npm run timing && remotion render GhostTrials out/ghost-trials-1080p.mp4 --codec h264 --crf 18 --image-format png --pixel-format yuv420p --audio-codec aac --audio-bitrate 320k --concurrency 1",

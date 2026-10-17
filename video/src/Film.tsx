@@ -21,20 +21,21 @@ import {Close} from './scenes/Close';
 
 export const OVERLAP = 10;
 const components: Record<string, ComponentType<SceneProps>> = {open: Open, problem: Problem, turn: Turn, attack: Attack, fix: Fix, prove: Prove, result: Result, tools: Tools, different: Different, close: Close};
-const effects: Array<{name: keyof typeof assets.sfx; scene: string; word?: string; volume?: number}> = [
-  {name: 'tick', scene: 'open', word: 'failure'},
-  {name: 'thud', scene: 'problem', word: 'proof'},
-  {name: 'glitch', scene: 'problem', word: 'simulation'},
-  {name: 'click', scene: 'turn', word: 'scenario'},
-  {name: 'wobble', scene: 'attack', word: 'friction'},
-  {name: 'slot', scene: 'fix', word: 'saved'},
-  {name: 'riser', scene: 'prove', volume: 0.3},
-  {name: 'chime', scene: 'prove', word: 'nine'},
-  {name: 'stamp', scene: 'prove', word: 'passed'},
-  {name: 'pop', scene: 'result', word: 'one'},
-  {name: 'impact', scene: 'result', word: 'zero', volume: 0.35},
-  {name: 'typing', scene: 'tools', volume: 0.2},
-  {name: 'alarm', scene: 'tools', word: 'GPU'},
+const effects: Array<{name: keyof typeof assets.design; scene: string; word?: string; offset?: number; volume?: number}> = [
+  {name: 'tick', scene: 'open', word: 'failure', volume: 0.7},
+  {name: 'thud', scene: 'problem', word: 'proof', volume: 0.65},
+  {name: 'click', scene: 'turn', word: 'scenario', volume: 0.65},
+  {name: 'click', scene: 'attack', word: 'friction', volume: 0.65},
+  {name: 'click', scene: 'attack', word: 'mass', volume: 0.65},
+  {name: 'click', scene: 'attack', word: 'timing', volume: 0.65},
+  {name: 'slot', scene: 'fix', word: 'saved', volume: 0.65},
+  {name: 'chime', scene: 'prove', word: 'nine', offset: 18, volume: 0.45},
+  {name: 'pop', scene: 'result', word: 'avoided', volume: 0.6},
+  {name: 'pop', scene: 'result', word: 'mitigated', volume: 0.6},
+  {name: 'pop', scene: 'result', word: 'failed', volume: 0.6},
+  {name: 'pop', scene: 'result', word: 'catastrophic', volume: 0.6},
+  {name: 'click', scene: 'different', word: 'null', volume: 0.55},
+  {name: 'chime', scene: 'close', offset: 12, volume: 0.35},
 ];
 const ease = (value: number) => value * value * (3 - 2 * value);
 const visible = (scene: SceneTiming, index: number, frame: number) => {
@@ -48,7 +49,7 @@ export const Film: React.FC = () => {
   const visibleScenes = timing.scenes.map((scene, index) => ({scene, index})).filter(({scene, index}) => visible(scene, index, frame));
   const current = visibleScenes.at(-1)?.scene ?? timing.scenes[0];
   const speaking = timing.scenes.some((scene) => scene.lines.some((line) => line.startFrame <= frame && frame < line.startFrame + line.durationFrames));
-  const musicVolume = (speaking ? 0.06 : 0.16) * fade(frame, 0, 20) * (1 - fade(frame, timing.totalFrames - 50, timing.totalFrames));
+  const musicVolume = (speaking ? 0.3 : 0.6) * fade(frame, 0, 20) * (1 - fade(frame, timing.totalFrames - 50, timing.totalFrames));
   return <AbsoluteFill style={{background: theme.paper}}>
     {visibleScenes.map(({scene, index}) => {
       const Component = components[scene.id];
@@ -62,12 +63,13 @@ export const Film: React.FC = () => {
     <Captions scene={current} frame={frame} />
     {timing.scenes.flatMap((scene) => scene.lines.map((line) => assets.voice[line.file as keyof typeof assets.voice] && <Sequence key={line.file} from={line.startFrame} durationInFrames={line.durationFrames}><Audio src={staticFile(line.file)} /></Sequence>))}
     {assets.music && <Audio src={staticFile('audio/music.mp3')} volume={musicVolume} />}
-    {timing.scenes.slice(1).map((scene) => assets.sfx.whoosh && <Sequence key={`whoosh-${scene.id}`} from={scene.from - OVERLAP} durationInFrames={Math.min(45, timing.totalFrames - scene.from + OVERLAP)}><Audio src={staticFile('audio/sfx/whoosh.mp3')} volume={0.25} /></Sequence>)}
-    {effects.map((effect) => {
-      if (!assets.sfx[effect.name]) return null;
+    {timing.scenes.slice(1).map((scene) => assets.design.whoosh && <Sequence key={`whoosh-${scene.id}`} from={scene.from - OVERLAP} durationInFrames={Math.min(45, timing.totalFrames - scene.from + OVERLAP)}><Audio src={staticFile('audio/design/whoosh.mp3')} volume={0.5} /></Sequence>)}
+    {effects.map((effect, index) => {
+      if (!assets.design[effect.name]) return null;
       const trigger = effect.word ? wordTrigger(effect.scene, effect.word) : timing.scenes.find((scene) => scene.id === effect.scene)?.from;
       if (trigger === undefined) return null;
-      return <Sequence key={effect.name} from={trigger} durationInFrames={Math.min(90, timing.totalFrames - trigger)}><Audio src={staticFile(`audio/sfx/${effect.name}.mp3`)} volume={effect.volume ?? 0.45} /></Sequence>;
+      const from = trigger + (effect.offset ?? 0);
+      return <Sequence key={`${effect.name}-${effect.scene}-${index}`} from={from} durationInFrames={Math.min(90, timing.totalFrames - from)}><Audio src={staticFile(`audio/design/${effect.name}.mp3`)} volume={effect.volume ?? 0.55} /></Sequence>;
     })}
   </AbsoluteFill>;
 };

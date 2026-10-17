@@ -1,7 +1,7 @@
 export const theme = {
-  paper: '#f3efe6',
-  ink: '#191b1e',
-  accent: '#f36b2b',
+  paper: '#f7f6f3',
+  ink: '#282b2f',
+  accent: '#ed6225',
   mutedOpacity: 0.45,
   footerOpacity: 0.4,
 } as const;

@@ -24,5 +24,5 @@ const scenes = script.scenes.map((scene, sceneIndex) => {
   return {id: scene.id, from, durationInFrames, lines};
 });
 writeFileSync('src/timing.json', JSON.stringify({fps: FPS, totalFrames: cursor, scenes}, null, 2) + '\n');
-writeFileSync('src/assets.json', JSON.stringify({voice: Object.fromEntries(scenes.flatMap((scene) => scene.lines.map((line) => [line.file, existsSync(`public/${line.file}`)]))), music: existsSync('public/audio/music.mp3'), sfx: Object.fromEntries(['tick','alarm','glitch','thud','slot','wobble','whoosh','riser','impact','click','pop','stamp','chime','cash','typing'].map((name) => [name, existsSync(`public/audio/sfx/${name}.mp3`)]))}, null, 2) + '\n');
+writeFileSync('src/assets.json', JSON.stringify({voice: Object.fromEntries(scenes.flatMap((scene) => scene.lines.map((line) => [line.file, existsSync(`public/${line.file}`)]))), music: existsSync('public/audio/music.mp3'), sfx: Object.fromEntries(['tick','alarm','glitch','thud','slot','wobble','whoosh','riser','impact','click','pop','stamp','chime','cash','typing'].map((name) => [name, existsSync(`public/audio/sfx/${name}.mp3`)])), design: Object.fromEntries(['tick','thud','click','slot','chime','pop','whoosh'].map((name) => [name, existsSync(`public/audio/design/${name}.mp3`)]))}, null, 2) + '\n');
 console.log(`Timing: ${cursor} frames`);
