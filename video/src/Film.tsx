@@ -49,7 +49,7 @@ export const Film: React.FC = () => {
   const visibleScenes = timing.scenes.map((scene, index) => ({scene, index})).filter(({scene, index}) => visible(scene, index, frame));
   const current = visibleScenes.at(-1)?.scene ?? timing.scenes[0];
   const speaking = timing.scenes.some((scene) => scene.lines.some((line) => line.startFrame <= frame && frame < line.startFrame + line.durationFrames));
-  const musicVolume = (speaking ? 0.3 : 0.6) * fade(frame, 0, 20) * (1 - fade(frame, timing.totalFrames - 50, timing.totalFrames));
+  const musicVolume = (speaking ? 0.55 : 0.8) * fade(frame, 0, 20) * (1 - fade(frame, timing.totalFrames - 50, timing.totalFrames));
   return <AbsoluteFill style={{background: theme.paper}}>
     {visibleScenes.map(({scene, index}) => {
       const Component = components[scene.id];
