@@ -1,0 +1,34 @@
+{
+  "words": [
+    {
+      "word": "Ghost",
+      "start": 0,
+      "end": 0.302
+    },
+    {
+      "word": "Trials",
+      "start": 0.337,
+      "end": 0.627
+    },
+    {
+      "word": "breaks",
+      "start": 0.673,
+      "end": 0.917
+    },
+    {
+      "word": "the",
+      "start": 0.964,
+      "end": 1.033
+    },
+    {
+      "word": "trial",
+      "start": 1.068,
+      "end": 1.347
+    },
+    {
+      "word": "first.",
+      "start": 1.416,
+      "end": 2.043
+    }
+  ]
+}

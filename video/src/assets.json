@@ -1,0 +1,38 @@
+{
+  "voice": {
+    "audio/vo/open_0.mp3": true,
+    "audio/vo/open_1.mp3": true,
+    "audio/vo/problem_0.mp3": true,
+    "audio/vo/problem_1.mp3": true,
+    "audio/vo/turn_0.mp3": true,
+    "audio/vo/turn_1.mp3": true,
+    "audio/vo/attack_0.mp3": true,
+    "audio/vo/fix_0.mp3": true,
+    "audio/vo/prove_0.mp3": true,
+    "audio/vo/prove_1.mp3": true,
+    "audio/vo/result_0.mp3": true,
+    "audio/vo/tools_0.mp3": true,
+    "audio/vo/tools_1.mp3": true,
+    "audio/vo/different_0.mp3": true,
+    "audio/vo/different_1.mp3": true,
+    "audio/vo/close_0.mp3": true
+  },
+  "music": true,
+  "sfx": {
+    "tick": true,
+    "alarm": true,
+    "glitch": true,
+    "thud": true,
+    "slot": true,
+    "wobble": true,
+    "whoosh": true,
+    "riser": true,
+    "impact": true,
+    "click": true,
+    "pop": true,
+    "stamp": true,
+    "chime": true,
+    "cash": true,
+    "typing": true
+  }
+}

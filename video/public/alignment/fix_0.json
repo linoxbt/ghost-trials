@@ -1,0 +1,69 @@
+{
+  "words": [
+    {
+      "word": "A",
+      "start": 0,
+      "end": 0.081
+    },
+    {
+      "word": "Ghost",
+      "start": 0.174,
+      "end": 0.441
+    },
+    {
+      "word": "Case",
+      "start": 0.499,
+      "end": 0.778
+    },
+    {
+      "word": "is",
+      "start": 0.824,
+      "end": 0.894
+    },
+    {
+      "word": "saved",
+      "start": 0.952,
+      "end": 1.312
+    },
+    {
+      "word": "only",
+      "start": 1.382,
+      "end": 1.625
+    },
+    {
+      "word": "after",
+      "start": 1.683,
+      "end": 1.881
+    },
+    {
+      "word": "the",
+      "start": 1.916,
+      "end": 1.985
+    },
+    {
+      "word": "artifact",
+      "start": 2.055,
+      "end": 2.589
+    },
+    {
+      "word": "and",
+      "start": 2.635,
+      "end": 2.705
+    },
+    {
+      "word": "metric",
+      "start": 2.752,
+      "end": 3.077
+    },
+    {
+      "word": "checks",
+      "start": 3.146,
+      "end": 3.46
+    },
+    {
+      "word": "pass.",
+      "start": 3.518,
+      "end": 4.319
+    }
+  ]
+}

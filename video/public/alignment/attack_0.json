@@ -1,0 +1,79 @@
+{
+  "words": [
+    {
+      "word": "The",
+      "start": 0,
+      "end": 0.163
+    },
+    {
+      "word": "hunt",
+      "start": 0.232,
+      "end": 0.453
+    },
+    {
+      "word": "varies",
+      "start": 0.511,
+      "end": 0.836
+    },
+    {
+      "word": "friction,",
+      "start": 0.894,
+      "end": 1.474
+    },
+    {
+      "word": "mass,",
+      "start": 1.556,
+      "end": 2.009
+    },
+    {
+      "word": "and",
+      "start": 2.043,
+      "end": 2.229
+    },
+    {
+      "word": "timing,",
+      "start": 2.287,
+      "end": 2.879
+    },
+    {
+      "word": "inside",
+      "start": 3.088,
+      "end": 3.529
+    },
+    {
+      "word": "a",
+      "start": 3.553,
+      "end": 3.576
+    },
+    {
+      "word": "budget",
+      "start": 3.622,
+      "end": 3.959
+    },
+    {
+      "word": "of",
+      "start": 4.017,
+      "end": 4.087
+    },
+    {
+      "word": "three",
+      "start": 4.156,
+      "end": 4.458
+    },
+    {
+      "word": "to",
+      "start": 4.505,
+      "end": 4.574
+    },
+    {
+      "word": "fifty",
+      "start": 4.644,
+      "end": 4.946
+    },
+    {
+      "word": "trials.",
+      "start": 4.992,
+      "end": 5.851
+    }
+  ]
+}

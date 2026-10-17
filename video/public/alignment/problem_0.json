@@ -1,0 +1,44 @@
+{
+  "words": [
+    {
+      "word": "A",
+      "start": 0,
+      "end": 0.081
+    },
+    {
+      "word": "stored",
+      "start": 0.174,
+      "end": 0.499
+    },
+    {
+      "word": "outcome",
+      "start": 0.546,
+      "end": 0.882
+    },
+    {
+      "word": "is",
+      "start": 0.917,
+      "end": 0.987
+    },
+    {
+      "word": "not",
+      "start": 1.057,
+      "end": 1.207
+    },
+    {
+      "word": "proof",
+      "start": 1.254,
+      "end": 1.474
+    },
+    {
+      "word": "of",
+      "start": 1.521,
+      "end": 1.579
+    },
+    {
+      "word": "execution.",
+      "start": 1.649,
+      "end": 2.601
+    }
+  ]
+}

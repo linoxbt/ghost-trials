@@ -1,0 +1,39 @@
+{
+  "words": [
+    {
+      "word": "It",
+      "start": 0,
+      "end": 0.151
+    },
+    {
+      "word": "is",
+      "start": 0.197,
+      "end": 0.279
+    },
+    {
+      "word": "not",
+      "start": 0.36,
+      "end": 0.522
+    },
+    {
+      "word": "a",
+      "start": 0.557,
+      "end": 0.592
+    },
+    {
+      "word": "safety",
+      "start": 0.639,
+      "end": 0.952
+    },
+    {
+      "word": "certification",
+      "start": 0.998,
+      "end": 1.649
+    },
+    {
+      "word": "service.",
+      "start": 1.73,
+      "end": 2.461
+    }
+  ]
+}

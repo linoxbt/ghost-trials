@@ -1,0 +1,39 @@
+{
+  "words": [
+    {
+      "word": "Insufficient",
+      "start": 0,
+      "end": 0.697
+    },
+    {
+      "word": "evidence",
+      "start": 0.755,
+      "end": 1.173
+    },
+    {
+      "word": "is",
+      "start": 1.219,
+      "end": 1.347
+    },
+    {
+      "word": "excluded,",
+      "start": 1.405,
+      "end": 1.939
+    },
+    {
+      "word": "and",
+      "start": 1.974,
+      "end": 2.09
+    },
+    {
+      "word": "shown",
+      "start": 2.148,
+      "end": 2.392
+    },
+    {
+      "word": "separately.",
+      "start": 2.473,
+      "end": 3.344
+    }
+  ]
+}
