@@ -1,0 +1,48 @@
+{
+  "gridTrials": {
+    "value": 9,
+    "source": "README.md: CPU smoke check"
+  },
+  "budgetMin": {
+    "value": 3,
+    "source": "docs/HUNT.md: trial budget"
+  },
+  "budgetMax": {
+    "value": 50,
+    "source": "docs/HUNT.md: trial budget"
+  },
+  "weights": {
+    "avoided": {
+      "value": 1,
+      "source": "README.md: Experimental evaluation score"
+    },
+    "mitigated": {
+      "value": 0.65,
+      "source": "README.md: Experimental evaluation score"
+    },
+    "failed": {
+      "value": 0.2,
+      "source": "README.md: Experimental evaluation score"
+    },
+    "catastrophic": {
+      "value": 0,
+      "source": "README.md: Experimental evaluation score"
+    }
+  },
+  "nullNotZero": {
+    "value": "null, not zero",
+    "source": "README.md: Experimental evaluation score"
+  },
+  "certification": {
+    "value": "not a safety-certification service",
+    "source": "README.md: introduction"
+  },
+  "storedOutcome": {
+    "value": "not execution proof",
+    "source": "README.md: Experimental evaluation score"
+  },
+  "cpuEvidence": {
+    "value": "simulation evidence",
+    "source": "README.md: Production hardening"
+  }
+}

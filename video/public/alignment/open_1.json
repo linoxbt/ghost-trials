@@ -1,0 +1,69 @@
+{
+  "words": [
+    {
+      "word": "Give",
+      "start": 0,
+      "end": 0.232
+    },
+    {
+      "word": "it",
+      "start": 0.255,
+      "end": 0.325
+    },
+    {
+      "word": "an",
+      "start": 0.36,
+      "end": 0.418
+    },
+    {
+      "word": "executable",
+      "start": 0.476,
+      "end": 1.057
+    },
+    {
+      "word": "controller",
+      "start": 1.091,
+      "end": 1.602
+    },
+    {
+      "word": "and",
+      "start": 1.649,
+      "end": 1.741
+    },
+    {
+      "word": "a",
+      "start": 1.8,
+      "end": 1.823
+    },
+    {
+      "word": "task.",
+      "start": 1.881,
+      "end": 2.415
+    },
+    {
+      "word": "It",
+      "start": 2.659,
+      "end": 2.798
+    },
+    {
+      "word": "searches",
+      "start": 2.856,
+      "end": 3.286
+    },
+    {
+      "word": "bounded",
+      "start": 3.355,
+      "end": 3.715
+    },
+    {
+      "word": "physical",
+      "start": 3.75,
+      "end": 4.087
+    },
+    {
+      "word": "conditions.",
+      "start": 4.145,
+      "end": 5.155
+    }
+  ]
+}

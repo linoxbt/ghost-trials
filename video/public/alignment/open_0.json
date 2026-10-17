@@ -1,0 +1,49 @@
+{
+  "words": [
+    {
+      "word": "Ghost",
+      "start": 0,
+      "end": 0.325
+    },
+    {
+      "word": "Trials",
+      "start": 0.36,
+      "end": 0.673
+    },
+    {
+      "word": "finds",
+      "start": 0.731,
+      "end": 0.998
+    },
+    {
+      "word": "the",
+      "start": 1.033,
+      "end": 1.103
+    },
+    {
+      "word": "failure",
+      "start": 1.149,
+      "end": 1.486
+    },
+    {
+      "word": "before",
+      "start": 1.521,
+      "end": 1.788
+    },
+    {
+      "word": "the",
+      "start": 1.823,
+      "end": 1.892
+    },
+    {
+      "word": "world",
+      "start": 1.95,
+      "end": 2.252
+    },
+    {
+      "word": "does.",
+      "start": 2.31,
+      "end": 3.019
+    }
+  ]
+}

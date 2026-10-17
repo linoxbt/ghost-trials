@@ -1,0 +1,54 @@
+{
+  "words": [
+    {
+      "word": "Fixed",
+      "start": 0,
+      "end": 0.325
+    },
+    {
+      "word": "on",
+      "start": 0.36,
+      "end": 0.43
+    },
+    {
+      "word": "a",
+      "start": 0.476,
+      "end": 0.499
+    },
+    {
+      "word": "case",
+      "start": 0.557,
+      "end": 0.836
+    },
+    {
+      "word": "means",
+      "start": 0.882,
+      "end": 1.115
+    },
+    {
+      "word": "this",
+      "start": 1.161,
+      "end": 1.312
+    },
+    {
+      "word": "candidate",
+      "start": 1.382,
+      "end": 1.846
+    },
+    {
+      "word": "passed",
+      "start": 1.881,
+      "end": 2.183
+    },
+    {
+      "word": "this",
+      "start": 2.206,
+      "end": 2.368
+    },
+    {
+      "word": "case.",
+      "start": 2.438,
+      "end": 3.111
+    }
+  ]
+}

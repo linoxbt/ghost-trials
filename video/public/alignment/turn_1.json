@@ -1,0 +1,59 @@
+{
+  "words": [
+    {
+      "word": "A",
+      "start": 0,
+      "end": 0.104
+    },
+    {
+      "word": "hazard",
+      "start": 0.197,
+      "end": 0.511
+    },
+    {
+      "word": "becomes",
+      "start": 0.546,
+      "end": 0.848
+    },
+    {
+      "word": "a",
+      "start": 0.894,
+      "end": 0.917
+    },
+    {
+      "word": "scenario,",
+      "start": 0.975,
+      "end": 1.602
+    },
+    {
+      "word": "a",
+      "start": 1.625,
+      "end": 1.66
+    },
+    {
+      "word": "simulation,",
+      "start": 1.718,
+      "end": 2.415
+    },
+    {
+      "word": "and",
+      "start": 2.438,
+      "end": 2.589
+    },
+    {
+      "word": "a",
+      "start": 2.647,
+      "end": 2.682
+    },
+    {
+      "word": "judged",
+      "start": 2.752,
+      "end": 3.135
+    },
+    {
+      "word": "trial.",
+      "start": 3.204,
+      "end": 4.04
+    }
+  ]
+}

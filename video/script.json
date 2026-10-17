@@ -1,0 +1,132 @@
+{
+  "title": "Ghost Trials: find the failure",
+  "model": "eleven_multilingual_v2",
+  "voices": {
+    "narrator": {
+      "name": "Lily",
+      "id": "pFZP5JQG7iQjIQuC4Bku",
+      "settings": {
+        "stability": 0.55,
+        "similarity_boost": 0.8,
+        "style": 0.2,
+        "use_speaker_boost": true
+      }
+    }
+  },
+  "scenes": [
+    {
+      "id": "open",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "Ghost Trials finds the failure before the world does."
+        },
+        {
+          "voice": "narrator",
+          "text": "Give it an executable controller and a task. It searches bounded physical conditions."
+        }
+      ]
+    },
+    {
+      "id": "problem",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "A stored outcome is not proof of execution."
+        },
+        {
+          "voice": "narrator",
+          "text": "CPU evidence is simulation evidence, not a hardware attestation."
+        }
+      ]
+    },
+    {
+      "id": "turn",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "Ghost Trials breaks the trial first."
+        },
+        {
+          "voice": "narrator",
+          "text": "A hazard becomes a scenario, a simulation, and a judged trial."
+        }
+      ]
+    },
+    {
+      "id": "attack",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "The hunt varies friction, mass, and timing, inside a budget of three to fifty trials."
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "A Ghost Case is saved only after the artifact and metric checks pass."
+        }
+      ]
+    },
+    {
+      "id": "prove",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "Nine bounded grid trials, then the same case replays on another controller."
+        },
+        {
+          "voice": "narrator",
+          "text": "Fixed on a case means this candidate passed this case."
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "Avoided weighs one. Mitigated weighs zero point six five. Failed weighs zero point two. Catastrophic weighs zero."
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "The default path runs real headless MuJoCo on CPU. No GPU is required."
+        },
+        {
+          "voice": "narrator",
+          "text": "The GPU path has not been demonstrated end to end."
+        }
+      ]
+    },
+    {
+      "id": "different",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "An unavailable score is null, not zero."
+        },
+        {
+          "voice": "narrator",
+          "text": "Insufficient evidence is excluded, and shown separately."
+        }
+      ]
+    },
+    {
+      "id": "close",
+      "lines": [
+        {
+          "voice": "narrator",
+          "text": "It is not a safety certification service."
+        }
+      ]
+    }
+  ]
+}
