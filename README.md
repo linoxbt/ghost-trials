@@ -2,11 +2,11 @@
 
 Ghost Trials is an **experimental autonomous red-team platform for physical AI**. Give it an executable robot controller and a task; it searches bounded physical conditions for failures, verifies recorded evidence, reproduces findings, and replays saved Ghost Cases against another controller. It is not a safety-certification service. The default path runs real headless MuJoCo physics on CPU. The original Unitree G1/SONIC/Isaac path remains optional and has not been demonstrated end to end in this deployment.
 
-The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. NVIDIA/Nebius services are optional integrations, not dependencies of CPU execution. The legacy `local` adapter remains synthetic and is development-only.
+The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. A separately gated NVIDIA Nemotron review through Nebius Token Factory can interpret every verified CPU trial; model failure never changes the measured outcome. NVIDIA/Nebius services are not dependencies of CPU physics. The legacy `local` adapter remains synthetic and is development-only.
 
 ## Hackathon submission
 
-The [Devpost submission package](docs/submission/README.md) contains the project overview, detailed [project story](docs/submission/PROJECT_STORY.md), field-by-field [organizer answers](docs/submission/ADDITIONAL_INFO.md), [demo script](docs/submission/DEMO_SCRIPT.md) and [evidence-status snapshot](docs/submission/EVIDENCE_STATUS.md). Personal details, numeric ratings, project-history confirmation and the public video URL require owner completion. The package distinguishes demonstrated model access from pending GPU/robot execution; it is not a submitted entry or proof of eligibility.
+The [Devpost submission package](docs/submission/README.md) contains the project overview, detailed [project story](docs/submission/PROJECT_STORY.md), field-by-field [organizer answers](docs/submission/ADDITIONAL_INFO.md), [demo script](docs/submission/DEMO_SCRIPT.md) and [evidence-status snapshot](docs/submission/EVIDENCE_STATUS.md). Personal details, numeric ratings, project-history confirmation and the public video URL require owner completion. The package distinguishes demonstrated CPU physics, provider connectivity, and pending live model review/G1 execution; it is not a submitted entry or proof of eligibility.
 
 ## Quick start
 
@@ -69,19 +69,24 @@ See [the frontend guide](docs/FRONTEND.md) for view URLs, brand assets, and brow
 
 The default `cpu` mode executes MuJoCo physics. The separate `local` mode remains an intentionally synthetic development adapter and its outputs must not be presented as MuJoCo, Cosmos, or Isaac output. Optional hosted providers and the GPU worker are documented in [docs/PRODUCTION.md](docs/PRODUCTION.md).
 
-## Nebius Nemotron mode
+## Optional Nemotron review of CPU trials
 
-Set these in `.env`:
+The default CPU Hunt remains free of paid inference. To request one Nemotron Super interpretation per **artifact-verified** CPU trial, configure the backend only:
 
 ```dotenv
-GHOST_JUDGE_PROVIDER=nebius
+GHOST_MODE=cpu
+GHOST_JUDGE_PROVIDER=cpu
+GHOST_CPU_MODEL_REVIEW_ENABLED=true
 NEBIUS_API_KEY=your_token_factory_key
 NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
 NEBIUS_SUPER_MODEL=nvidia/nemotron-3-super-120b-a12b
-NEBIUS_ULTRA_MODEL=nvidia/Nemotron-3-Ultra-550b-a55b
+GHOST_LIVE_EXECUTION_ENABLED=true
+GHOST_PROVIDER_SPENDING_CONTROLS_CONFIRMED=true
+GHOST_PLATFORM_BUDGET_CENTS=200
+GHOST_CPU_MODEL_REVIEW_RESERVATION_CENTS=10
 ```
 
-Use the exact model IDs currently shown in the Token Factory catalog. Each trial gets two Super passes. Confidence below 0.6 or category disagreement escalates to Ultra.
+Use the exact model ID shown in the current Token Factory catalog. An operator must also allocate the signed-in organization a budget through the existing `/ops/organizations/{organization_id}/budget` route. The 200-cent platform limit is an **admission reservation ceiling, not a billing guarantee**; confirm credit-only use or a provider-side hard limit before enabling live calls. No automatic Ultra escalation occurs in this CPU path. A missing key, budget exhaustion, timeout or invalid model citation leaves the measured MuJoCo trial complete and visibly marks its separate model review unavailable or failed. The older GPU path still uses the two-pass Super/Ultra judge.
 
 ## Production adapter boundary
 
@@ -136,7 +141,7 @@ ScenarioGenerator ──► Simulator ──► TrialJudge ──► evidence re
 
 ## Experimental evaluation score
 
-Synthetic demo records, unverified measurements, legacy rubrics, proxy-only measurements, incomplete artifacts, and uncertain findings are excluded. CPU trials use the versioned, measured `cpu-object-positioning-v1` rubric and do not pretend to have a Nemotron review. GPU-path trials require the configured live judge. A stored outcome or a configured provider is not execution proof. An unavailable score is `null`, not zero. The legacy API field `/safety-score` remains for compatibility; it does not imply certification.
+Synthetic demo records, unverified measurements, legacy rubrics, proxy-only measurements, incomplete artifacts, and uncertain findings are excluded. CPU trials use the versioned, measured `cpu-object-positioning-v1` rubric; any optional Nemotron interpretation is stored separately and shown only when it actually completed. GPU-path trials require the configured live judge. A stored outcome or a configured provider is not execution proof. An unavailable score is `null`, not zero. The legacy API field `/safety-score` remains for compatibility; it reports tested task success for compatible verified CPU trials and does not imply certification.
 
 `GET /trials/ID/reproducibility` exports scenario/configuration, checkpoint identity, execution recipe, raw trace and response-video references, hashes, verification results, original judge assessment, and measurement/replay limitations. Artifact references require authorization; this JSON does not embed the video. `GET /demonstration-readiness` reports the narrow recorded-trial milestone, never competition eligibility or hardware attestation.
 
@@ -152,7 +157,7 @@ This is an experimental product metric, not a safety standard or a calibrated pr
 
 See [evaluation methodology and remaining validation](docs/EVALUATION.md), [free-credit steps](docs/FREE_CREDITS.md), and [execution handoff](docs/EXECUTION_HANDOFF.md).
 
-For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. Local CPU MuJoCo execution is real simulation; the optional G1/SONIC GPU path still requires its own acceptance run. A hosted preview has no live backend unless a stable HTTPS CPU service is deployed and connected.
+For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. Local CPU MuJoCo execution is real simulation; the optional G1/SONIC GPU path still requires its own acceptance run. The hosted Netlify preview is connected to a Railway CPU backend; verify its health and sign-in flow before presenting it as a working demo.
 
 For the hosted frontend and backend proxy configuration, see [Netlify deployment](docs/NETLIFY.md). Netlify needs a public HTTPS FastAPI origin; model and GPU credentials stay on the backend services.
 

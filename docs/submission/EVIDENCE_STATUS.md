@@ -1,57 +1,37 @@
 # Submission evidence status
 
-Snapshot: September 28, 2026. Refresh after any actual model, simulation or hardware run. This is a development-status record, not independent attestation.
+Snapshot: October 16, 2026. This is an engineering validation record, not independent robotics attestation or safety certification. Refresh it after the deployed release is tested.
 
-## Verified within the current scope
+## Demonstrated CPU execution
 
-- The Python application test suite passed: **124 tests**. These include deliberately synthetic fixtures, mocked provider contracts, organization isolation, physical-upload validation and score-exclusion behavior.
-- Browser checks passed at 320, 390 and 1440 pixel widths for provenance labels/filters, unavailable scores, pending real execution, reproducibility downloads and layout.
-- Real Nebius Token Factory authentication and Nemotron inference have been exercised. An incomplete-evidence diagnostic returned `insufficient_evidence`; it was not a robot trial and did not establish physical-safety accuracy.
-- The September 23 local connectivity record captured a Super diagnostic using 714 total tokens. A subsequent bounded two-pass/escalation probe verified the configured integration path. No cost, latency or accuracy benchmark is inferred from these checks. Private validation files are not committed to the repository.
-- The application retains trial evidence and offers server-side integrity checks, separately recomputed metrics and video decoding. Successful fixture checks demonstrate implementation behavior, not actual G1 execution.
-- CPU MuJoCo contact-physics tests cover the reduced-traction implementation. That is not a GR00T/SONIC policy trial or Isaac Lab-Arena validation.
+- `python -m scripts.cpu_smoke --trials 16 --strategy adaptive` ran a real headless MuJoCo tabletop Hunt with an executable gantry-arm controller. It completed **16 physics trials** and found **three failures** in the bounded tested space.
+- A retained Ghost Case passed `cpu_trace_metrics_verified` artifact and metric verification. Exact replay reproduced the measured final block position: **0.625826 m** in both baseline and replay.
+- The `gantry-push-v2` controller was actually executed against that saved recipe and measured **0.776821 m**, passing this specific case (`fixed_on_case`). This does not establish that the candidate controller is generally safe.
+- The automatic reproduction status was `reproducible`. An empirical object-mass transition was recorded only for the tested pair and versions, not as a universal threshold.
+- The CPU backend retains simulator version, controller checkpoint digest, recipe, seed, measured telemetry, trajectory, evidence manifest, and replay information. Its trajectory graphic is state-derived; it is not camera or robot video.
 
-## Current stored records
+The smoke command deliberately disables all external model calls. Its artifacts were generated locally under `/tmp/ghost-competition-20261016/` and are not a published, independently reviewed dataset. The smoke verifies a local application workflow, not the deployed website or physical hardware.
 
-The inspected development database contained **23 completed legacy/demo records**. Nine explicitly declared synthetic metrics; the remaining fourteen originally had unknown metric origin, but their deterministic development-judge identifiers identify them as legacy synthetic records. The current evidence classifier labels all 23 synthetic demo records and excludes them from the experimental score.
+## Model and provider status
 
-At this snapshot:
+- A prior bounded Nebius Token Factory diagnostic exercised real Nemotron inference on incomplete evidence. It was **not** an evaluated robot trial.
+- The new optional CPU Nemotron reviewer is integrated with verified MuJoCo evidence, transactionally reserved application budget, exact metric-citation checks, and a distinct interpretation record. Its automated provider-boundary tests use `httpx.MockTransport`; **a live model review of a completed CPU trial has not yet been demonstrated**.
+- Live CPU review remains disabled by default. Before enabling it, confirm the provider's credit-only or hard-spend controls, allocate the organization budget, confirm the current model ID, and run one bounded trial. Application-side admission limits do not guarantee an external billing ceiling.
+- No Nebius AI Cloud GPU, Isaac/G1/SONIC execution, physical G1 run, live Cosmos generation, or robotics-expert independent review is claimed.
 
-- Score-eligible records: **0**.
-- Experimental score: **unavailable / null**, not zero.
-- Physical recording sessions stored: **0**.
-- Genuine end-to-end policy-execution milestone: **pending**.
+## Deployment and submission checks still required
 
-These are local deployment counts, not a benchmark dataset. They may change with use and should not be presented as measured robot performance. Original stored findings are preserved for inspection rather than rewritten as real evidence.
+- Validate sign-in and a fresh CPU Hunt, evidence report, replay, and comparison on the deployed Netlify/Railway release.
+- If the team wants to claim runtime NVIDIA-model use in the demonstrated CPU flow, complete one authorized live Nemotron review and retain its response and usage alongside measured trial evidence. Do not call contract tests a live inference demonstration.
+- Have a robotics reviewer inspect the configuration, controller identity, trace, measurement definitions, and repeatability limitations.
+- Record and publish the three-minute-or-shorter demo showing at least one minute of actual key modules operating. Complete owner-specific Devpost fields and confirm hackathon eligibility.
 
-## Implemented but not demonstrated end to end
-
-- Authorized Cosmos video-generation client paths and artifact retention.
-- Authenticated remote worker interfaces for policy execution and returned telemetry.
-- Compatible checkpoint access/identity checks and deployment handoff tools.
-- G1 read-only joint/IMU/command and camera recording workflow.
-- Nemotron review of an actual robot-policy trial or actual physical capture.
-- External robotics-review and repeatability workflows.
-
-## Still required
-
-- An authorized GPU worker and compatible fine-tuned policy checkpoint, or a robotics partner with an approved externally running G1 policy.
-- Live Cosmos access if generated world-model video is included in the demonstrated pipeline.
-- One recorded policy execution, raw telemetry, executed configuration and reproducibility export.
-- Live model review of that actual trial, plus human inspection of provenance, timing and measurement quality.
-- A public demo video and final owner-completed Devpost fields.
-
-No physical hardware operation, GPU execution, independent reviewer assessment, production scale, safety certification, calibrated failure probability or comparative model benchmark is claimed.
-
-## Reproduce software checks
-
-Run the test suite in development mode with the documented optional dependencies:
+## Reproduce the local software checks
 
 ```bash
 uv sync --extra dev --extra physics --extra models --extra storage
 uv run pytest -q
+uv run python -m scripts.cpu_smoke --trials 16 --strategy adaptive
 ```
 
-FFmpeg/ffprobe must be available for recording-validation tests. Browser scripts require a locally installed Playwright/Chromium setup; the evidence frontend check targets an isolated fixture server on port 8013, not a customer's live deployment. Never use the browser fixture script to create fake evidence in a real organization workspace.
-
-The application offers `GET /demonstration-readiness` and `GET /trials/ID/reproducibility` behind its normal private-workspace authorization. These endpoints are read-only and do not launch GPU or paid inference jobs. A readiness result is a narrow evidence milestone, not hackathon approval or hardware attestation.
+The application exposes private `GET /demonstration-readiness` and `GET /trials/{id}/reproducibility` endpoints. They are evidence aids, not approval or attestation.

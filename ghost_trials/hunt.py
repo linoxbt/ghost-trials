@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, compare_trials, evidence_class, evidence_report, expected_rubric
-from .models import Trial, TrialStatus, utc_now
+from .models import ModelReview, Trial, TrialStatus, utc_now
 from workers.isaac.hazards import supported_controls as isaac_supported_controls
 
 
@@ -158,6 +158,7 @@ class GhostCase(BaseModel):
     rubric_version: str
     measured_metrics: dict
     judge_interpretation: dict | None = None
+    model_review: ModelReview | None = None
     evidence_verification: dict
     artifact_manifest: dict
     recording_url: str | None
@@ -337,6 +338,7 @@ def case_from_trial(hunt: Hunt, trial: Trial, scenario) -> GhostCase:
                      policy=hunt.policy, simulator_version=m.simulator_version, rubric_version=expected_rubric(trial),
                      measured_metrics=m.model_dump(mode="json"),
                      judge_interpretation=trial.judge_assessment.model_dump(mode="json") if trial.judge_assessment else None,
+                     model_review=trial.model_review,
                      evidence_verification=trial.evidence_verification, artifact_manifest=m.artifact_manifest,
                      recording_url=m.simulation_video_url, trajectory_url=m.trajectory_url, telemetry_url=m.trace_url)
 

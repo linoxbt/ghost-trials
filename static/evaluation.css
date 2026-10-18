@@ -4,3 +4,4 @@
 .evidence-label.synthetic_demo,.evidence-label.unverified{color:#a43f12}
 .evidence-notice{border-left:4px solid #eb6b22;margin-bottom:20px}
 .evidence-notice p{overflow-wrap:anywhere}
+.cpu-replay{padding:12px}.cpu-replay canvas{display:block;width:100%;height:auto;background:#151b25;border-radius:8px}.cpu-replay-controls{display:flex;gap:12px;align-items:center;margin-top:12px}.cpu-replay-controls input{flex:1;min-width:80px;accent-color:#ef7845}.cpu-replay-controls span{font-family:'IBM Plex Mono',monospace;font-size:11px;white-space:nowrap}.cpu-replay p{font-size:11px;color:var(--muted)}

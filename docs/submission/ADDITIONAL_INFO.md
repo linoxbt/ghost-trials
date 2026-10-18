@@ -34,7 +34,7 @@ Otherwise provide the actual province(s) required by the form and check the appl
 
 Physical AI Track
 
-Editorial note: This is the intended track because the project evaluates embodied robot policies and their evidence. Hardware is not mandatory for that track, but the current incomplete policy-execution milestone is not erased by selecting it. Ask the organizers about track fit if the final submission is narrowed to evidence review without demonstrated robot-policy execution.
+Editorial note: The demonstrated CPU MuJoCo gantry task executes an actual controller in physics simulation; physical hardware is not required by this track's software-only video provision. Do not describe that task as G1/SONIC execution. The separate Nebius/NVIDIA runtime requirement still needs a completed live model call in the submitted workflow.
 
 ## Is your project new or existing prior to August 26, 2026?
 
@@ -42,7 +42,7 @@ Select New only if the project genuinely began on or after August 26, 2026. The 
 
 If new, and an explanation field is available, paste only if accurate:
 
-Ghost Trials was developed during the hackathon submission period as a new experimental robot-policy evaluation project. Its current implementation includes a multi-page evidence workspace, Nebius Token Factory/Nemotron integration, private team access, persistent trial jobs, provenance-aware scoring and reproducibility exports. Robot-policy execution and live Cosmos validation remain pending external compute, checkpoint and access requirements.
+Ghost Trials was developed during the hackathon submission period as a new experimental robot-policy evaluation project. Its current implementation includes a CPU MuJoCo Hunt with real controller execution, bounded adaptive failure search, evidence verification, replay and regression, plus a multi-page private workspace and a separately gated Nebius Token Factory/Nemotron review integration. G1/SONIC/Isaac and live Cosmos validation remain optional, pending resources.
 
 If existing, adapt this alternative to your actual history:
 
@@ -58,15 +58,15 @@ The repository contains an MIT license and README with development setup, archit
 
 ## Working demo URL
 
-https://webster-republican-underground-bras.trycloudflare.com/app/
+https://ghost-trials.netlify.app/
 
-Editorial note: This is a temporary signed-in development preview, not a durable production URL. Validate it immediately before submission and provide safe, authorized judging instructions if used. Its existing trial data is synthetic, and paid execution is disabled until the operator configures the required resources and controls. Do not describe it as a live GPU demonstration. The supplied form says this URL is optional for Physical AI submissions.
+Editorial note: The static frontend uses a persistent Railway FastAPI CPU backend. Validate sign-in, a fresh CPU Hunt, evidence and replay on the deployed release before submitting. Historical synthetic records remain labeled; the live CPU Hunt is real simulation, not GPU/G1 or physical hardware. Nemotron review is separately gated by operator-approved spending controls.
 
 ## Which model(s) did you use, and why did you choose that size/variant?
 
-Our implemented evidence-review integration uses NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) through Nebius Token Factory, with Nemotron 3 Ultra (`nvidia/Nemotron-3-Ultra-550b-a55b`) as the escalation tier. Super is the routine tier in the application design; two passes are requested against the same trial evidence. Category disagreement or self-reported confidence below 0.6 triggers Ultra for an additional review. This tiered approach is intended to limit unnecessary use of the larger model while preserving a deeper review path for ambiguous cases; we have not yet benchmarked its cost/accuracy trade-off on a robot-trial dataset.
+The CPU Hunt's optional evidence reviewer uses NVIDIA Nemotron 3 Super (`nvidia/nemotron-3-super-120b-a12b`) through Nebius Token Factory. It requests one bounded interpretation per artifact-verified trial and records the model suggestion separately from measured task pass/fail. We chose Super for routine review and disabled automatic Ultra escalation in this credit-limited CPU path. The older GPU judge adapter retains its two-Super-pass and Ultra-on-disagreement flow, but that path is not a demonstrated G1 run.
 
-Real API access and judge inference have been exercised using an incomplete-evidence diagnostic, not a real robot execution. The judge returned insufficient evidence rather than a robot safety score. Super and Ultra access were verified in the available model catalog, and the integrated diagnostic path was exercised. This supports a model-connectivity claim, not a claim of calibrated physical-safety reasoning.
+Earlier real API access and judge inference were exercised using an incomplete-evidence diagnostic, not a robot execution. The new CPU reviewer has contract tests against genuine MuJoCo evidence; update this answer with the exact trial ID, model ID, tokens and output only after a live Token Factory review has completed. Neither path establishes calibrated physical-safety reasoning.
 
 Cosmos, GR00T and GEAR-SONIC are intended integration components with code and handoff instructions in the repository. Live Cosmos generation and compatible fine-tuned GR00T/SONIC execution have not yet been validated in this deployment. We do not count those stages as demonstrated model use.
 
@@ -82,7 +82,7 @@ Editorial note: Choose your own 1–10 rating after reviewing the actual output.
 
 ## Did you fine-tune, prompt-engineer, or use Nemotron out of the box?
 
-We used the hosted models without fine-tuning and applied task-specific prompt engineering. The judge prompt defines the allowed outcome categories, requires structured JSON, asks for evidence-citing reasoning, and includes an insufficient-evidence outcome. The application validates responses against a typed schema and performs two-pass agreement checking, with optional escalation to Ultra.
+We use hosted models without fine-tuning and apply task-specific prompt engineering. The CPU review requests structured JSON, cites exact supplied metric values, and includes an insufficient-evidence option. The application rejects invented citations and flags any disagreement with the measured outcome; model confidence remains self-reported. The separate, unvalidated G1/GPU judge path retains two-pass agreement and optional Ultra escalation.
 
 Deterministic application guardrails independently constrain the published finding and score. Missing artifacts, unknown provenance, proxy-based measurements, legacy rubric records and uncertain judgments cannot become verified success claims. The original model assessment remains available for inspection alongside any guarded finding. This approach separates the model's interpretive role from the software's responsibility to preserve provenance and avoid unsupported conclusions.
 
@@ -152,4 +152,4 @@ Check this only after you and every relevant teammate confirm that the statement
 
 ## Final owner review
 
-The technical text is drafted from verified implementation status, but personal fields, ratings, project history, participation and legal attestations need your confirmation. The demo video URL remains missing, the preview URL is temporary, and one genuine end-to-end policy trial remains pending. This document does not turn those pending items into completed submission requirements.
+The technical text is drafted from verified implementation status, but personal fields, ratings, project history, participation and legal attestations need your confirmation. The public demo video remains missing; confirm a live Nemotron interpretation of a verified CPU trial before claiming that runtime integration in the final entry. This document does not turn pending items into completed submission requirements.

@@ -1,81 +1,37 @@
+# Ghost Trials — Devpost project story
+
 ## Inspiration
 
-A robot can succeed at its normal task and still respond poorly when something unexpected happens. An obstructed aisle, a falling object, or reduced traction introduces a different question from “Can this policy complete the task?”: “What did it observe, how did it respond, and what evidence supports our conclusion?”
-
-Ghost Trials began with that distinction. We wanted to make robot-policy evaluation more inspectable by bringing scenario definitions, response recordings, telemetry, measurement methods and model-assisted findings into one coherent workspace.
-
-Our guiding idea is a flight recorder for physical AI: preserve the evidence behind a trial rather than reduce it to an impressive-looking score. This is an experimental evaluation platform, not an established certification authority or a claim that a robot is safe to deploy.
+Robot policies can look reliable in a small set of demonstrations and still fail when physical conditions change. A useful evaluator should search those conditions, preserve what actually happened, and make a failure easy to repeat against the next controller. Ghost Trials is an experimental red-team platform for that job—not a safety-certification authority.
 
 ## What it does
 
-Ghost Trials provides a structured workflow for defining hazards, organizing trial records, inspecting evidence and reviewing model interpretations. Its dashboard includes an overview, trial library, scenario templates, comparisons, benchmark coverage, reports, physical-recording plans, team administration and system configuration.
+Give Ghost Trials an executable controller, a task and a bounded trial budget. Its Hunt engine explores physical parameters, uses observed outcomes to select later experiments, repeats failures, probes a conditional failure boundary, and saves evidence-backed Ghost Cases. A saved case can be replayed with the same recipe and seed or run against a different compatible controller. “Passed this case” never means “safe in general.”
 
-Each record is labeled according to its evidence source. Synthetic development records are explicitly identified as fixtures, not measurements from an executed robot. Records without validated provenance remain unverified. Operator-declared physical uploads are labeled unattested rather than silently treated as proof of hardware execution.
+The **demonstrated, CPU-first embodiment** is a two-axis gantry arm pushing a free block into a tabletop target band. Each trial advances real MuJoCo articulation, contact, gravity and friction while a selected controller acts at every physics step. The current search controls are object mass, table/block friction, initial block position and controller delay. Those controls affect the executable model; the app rejects unsupported knobs. The built-in controllers and a bounded JSON neural-policy format run on CPU. That neural example is not a trained production policy, and none of these controllers is a Unitree G1, GR00T or SONIC checkpoint.
 
-The experimental evaluation score is deliberately conservative. Synthetic, unverified, legacy, proxy-based, incomplete or uncertain records do not contribute to it. Records also require a live Nemotron review to become score-eligible. When eligible evidence is absent, the interface shows an unavailable score rather than inventing a reassuring number. Incompatible evaluation cohorts are not pooled into a single performance claim.
-
-Reproducibility reports keep the policy checkpoint identity, runtime, scenario seed and recipe, response-video and raw-telemetry references, artifact hashes, validation results and measurement limitations together. This lets a reviewer inspect the basis for a finding without confusing an AI explanation with a measurement.
+Each completed CPU trial retains its controller digest, seed, full recipe, simulator version, sampled telemetry, measured task result, state-derived visualization and artifact hashes. A separate verifier checks hashes, controller identity, monotonic timestamps, displacement, final position and task outcome. Hashes and trace recomputation do not prove hardware execution or real-world transfer. Generated images and landing-page illustrations are not robot-response evidence.
 
 ## How we built it
 
-The backend uses Python, FastAPI, Pydantic and SQLite. It exposes typed trial APIs and streams progress over WebSockets. A persistent job queue retains job states across restarts, while private artifact routes enforce organization-level ownership. Individual identity and team access use Privy-backed authentication, organization membership, role checks, session revocation and an audit trail.
+FastAPI, Pydantic and SQLite provide typed APIs, private organization-isolated workspaces, durable trial jobs, budgets, and audit records. The existing Privy sign-in remains in place. The frontend exposes Hunt, Failures, Trials, Compare and System rather than a single dashboard. A telemetry-driven replay animates **recorded simulator state samples**, explicitly labeled as not camera footage.
 
-The frontend combines a responsive JavaScript application with a React-based authentication integration, a custom orange visual identity, collapsible navigation, mobile layouts and dedicated pages for the major evaluation workflows. The landing-page humanoid visualization is explicitly an illustration, not evidence that a simulator ran.
+The Hunt uses bounded exploration followed by failure-focused repeats, mutations and one-dimensional boundary probes. It can report a boundary only when a pass/fail pair was observed with the same seed and other controls held constant. Provider errors and missing evidence are not policy failures. Synthetic development fixtures remain visibly labeled and cannot become verified Ghost Cases.
 
-The execution architecture separates three responsibilities:
+### NVIDIA and Nebius
 
-1. Scenario generation produces a structured hazard definition and, when an authorized Cosmos service is available, an illustrative world-model video.
-2. Policy execution runs a supported robot stack on an authorized worker and returns telemetry, a response recording and the executed configuration.
-3. Evidence review interprets captured measurements, while deterministic evidence guardrails control which conclusions and scores the application can publish.
+Ghost Trials includes a task-specific reviewer for NVIDIA Nemotron Super served by **Nebius Token Factory**. When an operator enables it and budgets admit the request, each artifact-verified CPU trial makes one runtime inference call. The model receives the measured task result, selected metric values, evidence hashes and recipe—not authority to generate robot measurements. Its interpretation, cited values, model ID, latency and token usage are stored separately. Incorrect citations and disagreement with the deterministic result are flagged; provider failure leaves the measured trial intact. No local GPU is required for this remote inference.
 
-This separation matters because a generated scenario video cannot establish what a robot actually did. Only a recorded policy execution or an authorized physical recording can supply that evidence.
+The integration is off by default until credit-only use or provider-side spending controls are confirmed. An application-side reservation ceiling is not a guaranteed external billing limit. **Before submitting, replace this paragraph with the exact live Token Factory trial IDs and observed model results from the final deployed run. Do not claim that the new CPU reviewer ran live solely because its adapter or contract tests passed.** Earlier real Nemotron connectivity was tested on an incomplete-evidence diagnostic; that was not a robot trial.
 
-## NVIDIA models and Nebius
+The repository retains optional Cosmos video and G1/SONIC/Isaac worker interfaces. They have not been validated as an end-to-end G1 execution in this CPU deployment and are not represented as demonstrated features. Cosmos video, if used later, illustrates a hazard; it is not a policy-response recording.
 
-The implemented judge uses NVIDIA Nemotron through Nebius Token Factory's inference API. It requests structured, evidence-citing findings from two Nemotron Super passes and escalates to Nemotron Ultra when categories disagree or reported confidence is low. A larger model is used for unresolved cases, not automatically for every request.
+## Challenges and learning
 
-Real Token Factory authentication and Nemotron inference have been verified with a deliberately incomplete evidence probe. The probe returned an insufficient-evidence finding. That confirms access to a real hosted NVIDIA model, but it is not a completed robot trial or a validation of judge accuracy on physical events.
+The hardest design boundary was separating measurement from interpretation. A generated clip or convincing model explanation can look like proof even when no robot policy ran. We made MuJoCo state and recorded telemetry the source of physical observations, with the model in an advisory role and explicit provenance on every record. We also learned to distinguish reproducibility from a broad safety claim: a repeated failure in a bounded simulator region is valuable, but does not establish behavior on every surface, policy or physical robot.
 
-Token Factory allowed us to exercise the model-review integration without first procuring a GPU machine or self-hosting the judge. We did not provision Nebius AI Cloud GPU compute, and we do not claim Serverless Jobs, Serverless Endpoints or a specific GPU instance type as deployed components.
+## What we accomplished and what remains
 
-Production integration code is included for Cosmos video generation and remote robot-policy execution. The intended G1 workflow uses a compatible fine-tuned GR00T policy with GEAR-SONIC whole-body control. Compatible weights, authorized compute and runtime validation remain necessary. We do not present that intended workflow as already demonstrated.
+The CPU path executes real physics, discovers and reproduces failures, checks retained evidence and compares compatible controllers. The current live website uses Railway for the FastAPI CPU backend and Netlify for the frontend; the application itself is not hosted on Nebius AI Cloud. A submitted competition demonstration must show a genuine Token Factory runtime call from the verified-trial workflow, not merely configured credentials or a historical API probe.
 
-## Evidence validation and reproducibility
-
-For remote simulation evidence, the application retains worker artifacts, checks content hashes, separately recomputes metrics from telemetry and decodes the response video before treating the bundle as artifact-validated. These checks are implemented separately from the worker's metric reducer. They detect several forms of incomplete or inconsistent evidence, but cannot prove that a self-consistent bundle was produced by trustworthy hardware.
-
-For physical capture, an implemented read-only Unitree observer is designed to record joint feedback, IMU orientation, externally issued motor commands and camera footage. The upload workflow checks identity declarations, file integrity, timestamps, freshness, video decoding and measurement consistency. It never commands robot motion. This recorder has been tested with synthetic fixtures, not a physical G1.
-
-We also distinguish measurements from proxies. A change in motor commands after an operator marker is not proof that the policy recognized a hazard. Minimum clearance cannot be inferred reliably from joint positions alone; it requires suitable calibrated external measurements. Recorded outcomes, metric basis and uncertainty remain visible to the reviewer.
-
-## Challenges we faced
-
-The central challenge was not building another dashboard. It was making the evidence contract honest across development data, external services and eventual robot execution.
-
-During development, seeded fixtures made interface and API testing repeatable. However, a convincing fixture can be mistaken for a real policy measurement if its provenance is not visible. We addressed that by labeling demo records prominently, excluding them from scores, preserving original findings for inspection and failing closed when real execution is unavailable.
-
-Compute and checkpoint access also constrain validation. A Token Factory key provides hosted inference access; it does not supply a robot, an Isaac-compatible GPU worker or a task-compatible fine-tuned policy. We built configuration checks and blocked execution states so missing resources do not become fabricated results.
-
-Another challenge was separating integrity checking from independent validation. Hashes and metric recomputation are useful engineering controls, but they are not external certification, human review or GPU attestation. Ghost Trials reports those limits directly.
-
-## What we learned
-
-We learned that provenance is a product feature, not a small metadata detail. A reviewer needs to know whether a value came from a fixture, a simulator, an operator observation or a calibrated sensor before deciding what it means.
-
-We also learned that missing evidence should change the interface and the conclusion. An unavailable score, an explicit execution blocker and a retained partial artifact can be more informative than a confident narrative.
-
-Finally, repeatability depends on more than a random seed. Policy weights, executed recipes, software versions, hardware and measurement definitions all affect a trial. A defensible report must preserve those identities and state what remains uncertain.
-
-## Accomplishments
-
-We built a coherent multi-page evaluation workspace with private team access, persistent jobs, evidence inspection, comparison controls, provenance-aware scoring and structured exports. We implemented a physical-recording handoff that lets a team prepare capture plans before it obtains hardware access.
-
-At the September 28, 2026 verification snapshot, 124 automated tests passed. Browser checks covered evidence labels, unavailable scores, provenance filters, reproducibility downloads and layouts at phone and desktop widths. These tests establish software behavior on fixtures, not successful robot execution.
-
-## Current status and what's next
-
-The current deployment has no demonstrated end-to-end GR00T/GEAR-SONIC policy trial, no validated live Cosmos generation and no physical robot measurement. Existing trial records are demo evidence and are excluded from the experimental score. Real model connectivity is verified; physical safety performance is not.
-
-Our next milestone is one actual recorded policy trial with compatible weights and authorized compute, retained telemetry and response video, a live Nemotron review, and a robotics reviewer inspecting provenance, timing and measurement limitations. We will then assess reproducibility across a small scenario set and compare model findings against independently supplied labels.
-
-Ghost Trials' contribution is the evidence workflow: a place where scenarios, measurements, interpretations and limitations can be reviewed together. Our ambition is to make robot evaluation more accountable, without claiming that an unvalidated score replaces expert judgment or a formal safety process.
+Next we would validate against a more representative robot/task, gather independently reviewed failure labels, and test a compatible G1 policy on authorized compute. Until then, Ghost Trials should be judged as an evidence-conscious, autonomous **simulated-policy failure hunter**, not as a G1 safety certificate.

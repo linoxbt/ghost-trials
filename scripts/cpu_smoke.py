@@ -23,6 +23,8 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
                       GHOST_POLICY_NAME="gantry-push-v1", GHOST_EXECUTION_BACKEND="mujoco_cpu",
                       GHOST_CUSTOMER_AUTH_REQUIRED="false", GHOST_ADMIN_TOKEN="",
                       GHOST_OPERATOR_TOKEN="", GHOST_VIEWER_TOKEN="", PRIVY_APP_ID="",
+                      GHOST_CPU_MODEL_REVIEW_ENABLED="false", GHOST_LIVE_EXECUTION_ENABLED="false",
+                      GHOST_PROVIDER_SPENDING_CONTROLS_CONFIRMED="false", NEBIUS_API_KEY="",
                       GHOST_PIPELINE_DELAY_SECONDS="0", GHOST_JOB_TIMEOUT_SECONDS="30",
                       GHOST_DATA_PATH=str(root / "state.sqlite3"),
                       GHOST_ARTIFACT_ROOT=str(root / "artifacts"))
@@ -90,9 +92,11 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
             comparison = (await client.get("/comparisons", params={
                 "baseline": case["baseline_trial_id"], "candidate": regression_id})).json()
             coverage = (await client.get("/benchmarks")).json()
+            score = (await client.get("/safety-score")).json()
             if (not comparison["comparable"] or
                     "object_final_x_m" not in {row["name"] for row in comparison["metrics"]} or
-                    coverage["backend_hazards"].get("mujoco_cpu") != ["object_positioning"]):
+                    coverage["backend_hazards"].get("mujoco_cpu") != ["object_positioning"] or
+                    score["score_kind"] != "task_success_rate"):
                 raise RuntimeError("CPU comparison/benchmark integration failed")
             print(f"Regression finished: {result['outcome']}", flush=True)
             report = {"hunt_id": hunt_id, "status": state["status"], "trials_executed": state["trials_executed"],
