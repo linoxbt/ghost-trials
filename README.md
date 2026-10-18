@@ -6,7 +6,7 @@ The CPU task uses a two-axis gantry arm to position a free block on a tabletop. 
 
 ## Hackathon submission
 
-The [Devpost submission package](docs/submission/README.md) contains the project overview, detailed [project story](docs/submission/PROJECT_STORY.md), field-by-field [organizer answers](docs/submission/ADDITIONAL_INFO.md), [demo script](docs/submission/DEMO_SCRIPT.md) and [evidence-status snapshot](docs/submission/EVIDENCE_STATUS.md). Personal details, numeric ratings, project-history confirmation and the public video URL require owner completion. The package distinguishes demonstrated CPU physics, provider connectivity, and pending live model review/G1 execution; it is not a submitted entry or proof of eligibility.
+The current, paste-ready [Devpost submission draft](submission.md) and [judge-facing PDF dossier](submission.pdf) describe the demonstrated CPU physics and the completed live Nemotron review of a verified trial. Personal details, numeric ratings, project-history confirmation, the signed-in production demo and public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md); they are not the current evidence snapshot. Neither document is a submitted entry or proof of eligibility.
 
 ## Quick start
 

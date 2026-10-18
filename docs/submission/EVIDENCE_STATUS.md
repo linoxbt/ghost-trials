@@ -1,5 +1,7 @@
 # Submission evidence status
 
+> Historical 18 October snapshot written before the live CPU/Nemotron acceptance. See [submission.md](../../submission.md) for the updated, narrower claim and remaining validation limits.
+
 Snapshot: October 18, 2026. This is an engineering validation record, not independent robotics attestation or safety certification. Refresh it after the deployed release is tested.
 
 ## Demonstrated CPU execution
