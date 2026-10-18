@@ -1,18 +1,20 @@
 """Real physics evidence with a contract-tested Nebius boundary; no paid requests."""
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 
 from ghost_trials.accounts import Accounts
 from ghost_trials.config import Settings
-from ghost_trials.cpu_evidence import CpuEvidenceRepository
+from ghost_trials.cpu_evidence import CpuEvidenceRepository, verify_cpu_bundle
 from ghost_trials.cpu_review import CpuNemotronReviewer
 from ghost_trials.cpu_robot import CpuMujocoSimulator, CpuScenarioGenerator, recipe
 from ghost_trials.cpu_robot import CpuMeasuredJudge
 from ghost_trials.durable import DurableStore
 from ghost_trials.models import ScenarioCreate, Trial, TrialStatus
 from ghost_trials.pipeline import CertificationPipeline
+from scripts.cpu_live_review import run as run_cpu_review_probe
 
 
 async def verified_trial(tmp_path):
@@ -142,6 +144,32 @@ async def test_cpu_pipeline_persists_real_physics_and_separate_model_interpretat
     assert saved.model_review.evidence_digest and saved.model_review.model_id == settings.nebius_super_model
     assert saved.model_review.suggested_outcome == ("pass" if saved.metrics.task_completed else "fail")
     assert saved.evidence_verification["status"] == "cpu_trace_metrics_verified"
+
+
+@pytest.mark.asyncio
+async def test_operator_probe_retains_one_actual_passing_cpu_trial_without_paid_model(tmp_path):
+    output = tmp_path / "operator-probe"
+    report = await run_cpu_review_probe(output, live_nebius=False, seed=42)
+    assert report["status"] == "done" and report["task_completed"] is True
+    assert report["object_final_x_m"] == pytest.approx(0.729056, abs=0.005)
+    assert report["evidence_verification"] == "cpu_trace_metrics_verified"
+    assert report["model_review_status"] == "disabled"
+    store = DurableStore(output / "state.sqlite3")
+    await store.load()
+    saved = store.trials[report["trial_id"]]
+    assert saved.metrics.policy_checkpoint_digest == report["checkpoint_digest"]
+    assert (output / "artifacts" / "trials" / saved.trial_id / "telemetry.jsonl").exists()
+
+
+def test_public_reference_is_actual_verifiable_physics_and_not_customer_score():
+    bundle = Path(__file__).resolve().parents[1] / "static" / "reference" / "gantry-v1"
+    index = json.loads((bundle / "index.json").read_text())
+    summary = json.loads((bundle / "summary.json").read_text())
+    assert index["customer_score_eligible"] is False
+    assert index["model_review_status"] == "not_requested"
+    assert index["object_final_x_m"] == summary["object_final_x_m"]
+    assert summary["task_completed"] is True
+    assert verify_cpu_bundle(bundle, index["checkpoint_digest"])["status"] == "cpu_trace_metrics_verified"
 
 
 async def async_noop():
