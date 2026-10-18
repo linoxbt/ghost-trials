@@ -127,6 +127,7 @@ def evidence_report(trial: Trial, scenario: Scenario) -> dict:
                 "evidence_status": "recorded_cpu_simulation" if not missing else "insufficient_evidence",
                 "events": [e.model_dump() for e in m.events], "artifact_manifest": m.artifact_manifest,
                 "judge_interpretation": trial.judge_assessment.model_dump(mode="json") if trial.judge_assessment else None,
+                "model_review": trial.model_review.model_dump(mode="json") if trial.model_review else None,
                 "limitations": LIMITATIONS + ["Trajectory SVG is state-derived, not a policy-response video or hardware attestation."]}
     checks = [] if not m else [
         {"name": "reaction_target", "observed": m.time_to_react_ms, "target": target["reaction_ms"],
@@ -168,6 +169,7 @@ def evidence_report(trial: Trial, scenario: Scenario) -> dict:
             "events": [e.model_dump() for e in m.events] if m else [],
             "artifact_manifest": m.artifact_manifest if m else {},
             "judge_interpretation": trial.judge_assessment.model_dump(mode="json") if trial.judge_assessment else None,
+            "model_review": trial.model_review.model_dump(mode="json") if trial.model_review else None,
             "limitations": LIMITATIONS + (["Legacy finding was not evaluated with the current evidence guardrails."] if trial.rubric_version != expected_rubric(trial) else [])}
 
 
@@ -250,9 +252,13 @@ def demonstration_readiness(trials: list[Trial]) -> dict:
     reviewed = [t for t in trials if t.status == TrialStatus.DONE and t.tier_used
                 and "nemotron" in t.tier_used.lower()
                 and evidence_class(t) == "artifact_validated_simulation"]
+    cpu_reviewed = [t for t in trials if t.status == TrialStatus.DONE and t.embodiment == "GHOST_GANTRY_XY"
+                    and evidence_class(t) == "artifact_validated_simulation" and t.model_review
+                    and t.model_review.status == "complete"]
     return {"milestone": "one_recorded_policy_trial_with_nemotron_review",
             "status": "recorded_evidence_available" if reviewed else "pending_real_execution",
             "trial_ids": [t.trial_id for t in reviewed], "certification": False,
+            "cpu_trial_ids_with_live_nemotron": [t.trial_id for t in cpu_reviewed],
             "execution_attested": False, "independent_human_review": "not_performed",
             "requirements": ["Actual policy execution with compatible weights and compute, or an authorized on-site recording",
                 "Saved response video, raw telemetry, checkpoint identity and executed configuration",

@@ -79,6 +79,13 @@ async function mountEvidence(id){
 function mountEvaluation(page,id,query){
  if(page==='trials'&&id){
   const t=trials.find(t=>t.trial_id===id);if(t){
+   if(t.embodiment==='GHOST_GANTRY_XY'){
+    mountCpuReplay(t);
+    const review=t.model_review;
+    const panel=document.createElement('section');panel.className='panel evidence-panel cpu-model-review';
+    panel.innerHTML=`<div class="panel-header"><div><h2>NVIDIA Nemotron interpretation</h2><p>Separate from the measured MuJoCo task result.</p></div><span class="chip">${escapeHtml(review?.status||'not requested')}</span></div><div class="form-body">${review?.status==='complete'?`<p class="finding">${escapeHtml(review.interpretation)}</p><p>Model suggestion: <strong>${escapeHtml(review.suggested_outcome)}</strong>${review.disagrees_with_measurement?' · Disagrees with measured task outcome; measurement remains authoritative.':''}</p><p>Self-reported confidence: ${escapeHtml(review.self_reported_confidence)} · ${escapeHtml(review.model_id)} · ${escapeHtml(review.latency_ms)} ms</p><p>Evidence digest: <code>${escapeHtml(review.evidence_digest)}</code></p><details><summary>Metrics cited by the model</summary><pre>${escapeHtml(JSON.stringify(review.cited_metrics,null,2))}</pre></details>`:`<p>Model review ${escapeHtml(human(review?.status||'not requested'))}. The recorded physics result and evidence remain available; no Nemotron finding is implied.</p>`}</div>`;
+    $('#content .detail-grid')?.after(panel);
+   }
    const notice=document.createElement('section');notice.className='report-banner evidence-notice';
    notice.innerHTML=`<div><h2>${escapeHtml(evidenceLabel(t))}</h2><p>${recordClass(t)==='synthetic_demo'?'Numbers below are synthetic fixtures, not robot measurements.':recordClass(t)==='unverified'?'These measurements have no validated execution provenance. Do not present them as a robot run.':'Recorded evidence has limits; artifact checks do not attest hardware execution.'} ${t.score_eligible?'Eligible for the experimental cohort score, not certification.':'Excluded from the evaluation score.'}</p><p>${(t.score_exclusion_reasons||[]).map(r=>escapeHtml(human(r))).join(' · ')}</p></div>`;
    $('#content .page-heading')?.after(notice);
@@ -97,8 +104,8 @@ function mountEvaluation(page,id,query){
   select.onchange=()=>{filters.evidence=select.value;filterTrials();};$('#content .filters')?.append(select);
  }
  if(page==='overview'){
-  const first=$('#content .stat');if(first){first.querySelector('.stat-top').firstChild.textContent='Evaluation score';first.querySelector('.stat-note').textContent=summary.score_available?'Within one evaluation cohort':summary.scored_trials?'No pooled score across incompatible cohorts':'No eligible evidence yet';}
-  const caption=$('.score-center small');if(caption)caption.textContent='EVALUATION SCORE';
+  const first=$('#content .stat');if(first){first.querySelector('.stat-top').firstChild.textContent=cpu()?'Tested task success':'Evaluation score';first.querySelector('.stat-note').textContent=summary.score_available?'Within one compatible, tested cohort':summary.scored_trials?'No pooled score across incompatible cohorts':'No eligible evidence yet';}
+  const caption=$('.score-center small');if(caption)caption.textContent=cpu()?'TASK SUCCESS RATE':'EVALUATION SCORE';
   if(!summary.score_available){if(first)first.querySelector('.stat-value').textContent='—';$('.score-center strong').textContent='—';}
   const note=document.createElement('div');note.className='report-banner evidence-notice';note.innerHTML=`<div><h2>Experimental evaluation platform — not safety certification</h2><p>${summary.scored_trials||0} score-eligible records · ${summary.excluded_trials||0} completed findings excluded. ${Object.entries(summary.evidence_counts||{}).map(([k,n])=>`${n} ${escapeHtml(human(k))}`).join(' · ')||'No measurements recorded.'}</p><p>Outcome charts include legacy/demo findings; they are not verified robot performance. Scores exclude synthetic, unverified, proxy-based and legacy records.</p><a class="text-link" href="#/trials">Inspect evidence provenance →</a></div>`;$('#content .stats')?.before(note);
   $('#content .panel-header h2').textContent='Reported findings (all evidence types)';
@@ -110,6 +117,6 @@ async function loadDemonstrationReadiness(anchor){
  try{const result=await json('/demonstration-readiness');if(!anchor.isConnected)return;
   const node=document.createElement('section');node.className='tip';node.id='demonstrationReadiness';
   const cpuCount=trials.filter(t=>t.embodiment==='GHOST_GANTRY_XY'&&t.status==='done'&&recordClass(t)==='artifact_validated_simulation').length;
-  node.innerHTML=`<strong>${cpu()?'CPU MuJoCo execution':'Real-trial milestone'}: ${cpu()?`${cpuCount} trace-validated controller trial(s)`:(result.trial_ids.length?'recorded evidence available — human review still required':'pending G1 policy execution')}</strong><p>${cpu()?'These are real MuJoCo simulations, not G1 hardware/video or a Nemotron review. The optional G1 milestone is separate.':result.trial_ids.length?`${result.trial_ids.length} artifact-validated simulation records with a Nemotron review.`:'No qualifying recorded G1 policy trial with a live Nemotron review is available. Test fixtures and provider configuration do not complete this milestone.'}</p><a href="/docs#submission">Demo evidence checklist ↗</a>`;anchor.after(node);
+  node.innerHTML=`<strong>${cpu()?'CPU MuJoCo execution':'Real-trial milestone'}: ${cpu()?`${cpuCount} trace-validated controller trial(s)`:(result.trial_ids.length?'recorded evidence available — human review still required':'pending G1 policy execution')}</strong><p>${cpu()?`${result.cpu_trial_ids_with_live_nemotron?.length||0} verified CPU trial(s) also received a live Nemotron review. These are not G1 hardware or safety certification.`:result.trial_ids.length?`${result.trial_ids.length} artifact-validated simulation records with a Nemotron review.`:'No qualifying recorded G1 policy trial with a live Nemotron review is available. Test fixtures and provider configuration do not complete this milestone.'}</p><a href="/docs#submission">Demo evidence checklist ↗</a>`;anchor.after(node);
  }catch(error){if(anchor.isConnected){const node=document.createElement('p');node.className='tip';node.textContent='Real-trial milestone could not be checked. Do not assume execution has been verified.';anchor.after(node);}}
 }

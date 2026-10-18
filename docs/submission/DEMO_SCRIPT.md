@@ -1,68 +1,25 @@
-# Ghost Trials — current-build video script
+# Ghost Trials — live CPU Hunt demo runbook
 
-Target length: **2 minutes 45 seconds**. This script describes an honest current-build demonstration, not a completed GPU/hardware run. Do not film a fake “live robot trial.” Refresh the script after actual execution becomes available. Final Physical AI eligibility/competitiveness still depends on what the submitted project genuinely demonstrates.
+Target: **2:45** total, public YouTube upload. The Physical AI rules call for at least one minute of key application modules actually running when no physical hardware is used. Record the real app and API; do not substitute a fixture, landing-page animation or generated scenario image for policy execution.
 
-The official rules require a public YouTube video under three minutes and at least one minute of hardware operation or, without a hardware component, key application modules in action. This storyboard reserves more than a minute for operating the existing application. It does not guarantee the organizers will accept an incomplete original pipeline. [Official rules](https://nebiusglobalaihackathon.devpost.com/rules).
+## Before recording
 
-## 0:00–0:20 — The problem
+1. Use an isolated, signed-in workspace. Verify Netlify `/health` reports `cpu/mujoco_cpu/cpu`, and a three-trial test Hunt completes with trace-validated evidence.
+2. If a real Nebius review will be shown, confirm credit-only use or a provider-side spending limit, set the application cap and organization budget, enable the reviewer, then verify one completed trial has `model_review.status=complete` with model ID, token usage and evidence digest. Otherwise **do not say that this video demonstrates runtime Nemotron**; the submission's required model-use claim remains unproven.
+3. Run a disclosed, bounded adaptive Hunt budget large enough to show exploration, reproduction and an observed boundary when the trial outcomes support one. Do not promise a boundary in advance. Keep all original outcomes visible.
+4. Select a Ghost Case with verified artifacts. Test the alternate controller on that exact case and record the real result—even if it still fails. Verify the export contains the matching recipe, seed, controller digests and simulator version.
 
-Screen: actual dashboard overview. Keep the experimental-platform notice visible; do not hide the unavailable score.
+## Screen and narration sequence
 
-Narration:
+| Time | Actual screen action | Suggested narration |
+|---|---|---|
+| 0:00–0:20 | Open a measured failure and its telemetry-derived state replay. | “This controller failed a real MuJoCo physics trial. The animation is recorded simulator state, not camera footage or a generated robot video.” |
+| 0:20–0:45 | Open Hunt creation: gantry robot, selected controller, tabletop task and bounded budget. Click **Release the Ghost**. | “Ghost Trials searches physical conditions that the simulator actually controls: mass, friction, block position and controller delay.” |
+| 0:45–1:25 | Keep the live trial sequence and search map on screen as measured results arrive. | “The next candidate depends on earlier outcomes. Provider errors never count as policy failures.” |
+| 1:25–2:00 | Open a verified Ghost Case; show exact replay, the same measured final position and an observed boundary if present. | “The saved recipe, seed, checkpoint digest, telemetry and hashes let us inspect and repeat this particular failure. The boundary describes only the tested region.” |
+| 2:00–2:25 | Show the separate Nemotron panel **only after a live Token Factory request completed**. | “NVIDIA Nemotron on Nebius interprets verified measurements and cites supplied values. Its suggestion cannot overwrite the deterministic task result.” |
+| 2:25–2:45 | Show the candidate-controller regression and honest result. | “The new controller was executed on the same case. Here it still fails, so we do not claim a fix or general safety.” |
 
-“A robot's response to an unexpected event matters, but a score without evidence can be misleading. Ghost Trials is an experimental evaluation workspace that brings trial records, telemetry, provenance and model-assisted review together. It is not a safety certificate.”
+If no live Nemotron review is obtained, replace that screen/narration with “Model review is not available for this run” and resolve the hackathon's model-runtime requirement before submission. A historic missing-evidence API diagnostic does not replace this trial-linked demonstration.
 
-## 0:20–0:50 — Show what the records actually are
-
-Screen: open Trial runs, select the Synthetic demo filter, then open one existing record. Show its explicit provenance banner and original finding.
-
-Narration:
-
-“These existing records are development fixtures, not measurements from a real robot. They remain inspectable, but none contributes to our experimental evaluation score. Missing provenance is labeled unverified, and absent eligible evidence produces an unavailable score—not an invented success.”
-
-## 0:50–1:20 — Operate the evidence workflow
-
-Screen: use the evidence inspector, expand artifact/limitation details, and export the reproducibility JSON. Open the exported JSON and highlight configuration, checkpoint identity, trace/video references and replay limitations. In a fixture, missing values must remain visible.
-
-Narration:
-
-“The report preserves what is known and what is missing: policy identity, scenario setup, measurement method, validation and artifact references. A recorded command change is not automatically hazard recognition. Hash checking is not proof of hardware execution. Reviewers can inspect these limits rather than accept the judge's narrative as a measurement.”
-
-## 1:20–1:45 — Prepare for real evidence
-
-Screen: Physical recordings. Prepare a capture plan with unknown serial/checkpoint left blank and on-site confirmation unchecked. Show that the plan is awaiting access, not a robot already connected. Do this in an explicitly designated demonstration workspace, not a real customer workspace.
-
-Narration:
-
-“We can prepare a recording plan while hardware access is pending. Our implemented G1 recorder is read-only: it is designed to observe feedback, externally issued commands and camera footage. Physical testing still needs a compatible robot, an approved running policy and an on-site operator. No robot motion is enabled from this page.”
-
-## 1:45–2:15 — Explain the real Nebius/NVIDIA integration
-
-Screen: sanitized model-connectivity evidence and the implementation of the judge's two-pass/escalation path. Label the saved result “Prior real inference diagnostic — no robot execution.” Do not display `.env`, tokens or raw authentication headers.
-
-Narration:
-
-“The implemented judge connects to NVIDIA Nemotron on Nebius Token Factory. It uses two Super passes and escalates disagreements or uncertain cases to Ultra. Real inference has been verified with a missing-evidence diagnostic, which returned insufficient evidence. This validates the model integration, not robot behavior. Live Cosmos generation and the GPU policy stack have not yet been demonstrated here.”
-
-If you elect to film a fresh inference diagnostic, use the bounded provider-check command only after reviewing charges and explicitly authorizing that execution. Writing this script does not authorize or perform it. Label the diagnostic accurately and do not persist it as a robot trial.
-
-## 2:15–2:45 — Close with the current milestone
-
-Screen: dashboard pending real-trial milestone, then README/current status and public code repository.
-
-Narration:
-
-“The software workflow is implemented and covered by automated and mobile-browser tests. The next milestone is one actual policy execution with saved configuration, response video, telemetry, live Nemotron review and expert inspection. Ghost Trials' contribution is making the evidence and its limits visible—so confidence is earned from a recorded trial, not manufactured by an interface.”
-
-## Once a genuine trial exists
-
-Replace the fixture walkthrough with that specific trial. Show actual response footage, raw trace, the measured hazard-onset timeline, pinned checkpoint/configuration, artifact verification and the real model review. Identify the true backend: a SONIC/MuJoCo run must not be called Isaac Sim. Keep proxy and calibration limitations visible, and retain at least a minute of modules actually operating in the final video.
-
-## Recording checklist
-
-- Use readable text and spoken audio; keep the total below three minutes.
-- Do not represent generated imagery, prerecorded diagnostics or synthetic clips as live robot operation.
-- Get permission for any partner footage and avoid copyrighted audio/assets without authorization.
-- Conceal credentials, private account details and confidential telemetry.
-- Upload publicly to YouTube and replace `[PUBLIC_YOUTUBE_VIDEO_URL]` in the submission package.
-- Update the project story and model feedback to match the exact demonstrated build.
+The owner must record/upload the video, confirm Devpost identity and eligibility fields, and add the public YouTube URL. Conceal credentials, personal emails and private workspaces. A video script is not proof of an executed trial or model call.

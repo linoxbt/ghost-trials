@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from .adapters import ExecutionBlocked, ScenarioGenerator, Simulator, TrialJudge
-from .models import LiveEvent, Scenario, ScenarioCreate, Severity, StructuredDescription, Trial, TrialStatus
+from .models import LiveEvent, ModelReview, Scenario, ScenarioCreate, Severity, StructuredDescription, Trial, TrialStatus
 from .store import TrialStore
 from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, guard_judgment
 
@@ -159,6 +159,14 @@ class CertificationPipeline:
         result = guard_judgment(trial, scenario, result)
         trial.score_category, trial.confidence = result.score_category, result.confidence
         trial.tier_used, trial.reasoning_trace = result.tier_used, result.reasoning_trace
+        reviewer = getattr(self, "model_reviewer", None)
+        if reviewer is not None:
+            try:
+                trial.model_review = await reviewer.review(trial, scenario)
+            except Exception:
+                # Inference infrastructure cannot invalidate a measured robot trial.
+                logging.getLogger(__name__).error("cpu_model_review_failed trial_id=%s", trial.trial_id)
+                trial.model_review = ModelReview(status="provider_error")
         trial.completed_at = datetime.now(timezone.utc)
         await self._status(trial, TrialStatus.DONE, "Evaluation record saved; review evidence and limitations")
 

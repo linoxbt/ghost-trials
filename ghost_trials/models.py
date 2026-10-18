@@ -92,6 +92,21 @@ class JudgeResult(BaseModel):
     tier_used: str
 
 
+class ModelReview(BaseModel):
+    status: Literal["complete", "disabled", "unavailable", "budget_exhausted", "provider_error", "invalid_response"]
+    model_id: str | None = None
+    evidence_digest: str | None = None
+    suggested_outcome: Literal["pass", "fail", "insufficient_evidence"] | None = None
+    interpretation: str | None = None
+    cited_metrics: dict[str, float | bool] = Field(default_factory=dict)
+    self_reported_confidence: float | None = Field(default=None, ge=0, le=1)
+    disagrees_with_measurement: bool = False
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    latency_ms: int | None = Field(default=None, ge=0)
+    reviewed_at: datetime | None = None
+
+
 class Trial(BaseModel):
     organization_id: str = "legacy"
     trial_id: str
@@ -109,6 +124,7 @@ class Trial(BaseModel):
     completed_at: datetime | None = None
     rubric_version: str = "legacy-unversioned"
     judge_assessment: JudgeResult | None = None
+    model_review: ModelReview | None = None
     replay_of: str | None = None
     execution_mode: Literal["simulation", "physical"] = "simulation"
     physical_session_id: str | None = None
@@ -138,6 +154,7 @@ class SafetyScore(BaseModel):
     n_trials: int
     distribution: dict[str, int]
     safety_score: float | None
+    score_kind: Literal["task_success_rate", "legacy_weighted_evaluation"] = "legacy_weighted_evaluation"
     scored_trials: int = 0
     excluded_trials: int = 0
     score_available: bool = True

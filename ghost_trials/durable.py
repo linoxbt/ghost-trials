@@ -130,6 +130,18 @@ class DurableStore(TrialStore):
         self.trials[trial.trial_id] = trial
         self.audit("job_accepted", "operator", trial.trial_id, organization_id=trial.organization_id, subject=subject)
 
+    def reserve_model_review(self, trial, cents: int, platform_limit: int) -> bool:
+        """Reserve at most once, after evidence checks and before an external call."""
+        from .accounts import reserve_budget
+        with self.connect() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS reservations(trial_id TEXT PRIMARY KEY,organization_id TEXT,cents INTEGER NOT NULL)")
+            db.execute("BEGIN IMMEDIATE")
+            key = f"{trial.trial_id}:model-review"
+            if db.execute("SELECT 1 FROM reservations WHERE trial_id=?", (key,)).fetchone():
+                return False
+            reserve_budget(db, key, trial.organization_id, cents, platform_limit)
+        return True
+
     def job(self, trial_id):
         with self.connect() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (trial_id,)).fetchone()

@@ -35,12 +35,10 @@ For an existing checkout whose private `.env` still selects GPU providers, use `
 
 ### Public CPU backend
 
-The Netlify site is a static frontend. It needs a continuously running FastAPI
-backend at a stable HTTPS origin; an ephemeral `trycloudflare.com` quick tunnel is
-not a deployment. The root `Dockerfile` and `railway.json` are ready for a
-single-replica Railway CPU service, but adding that service, its persistent
-volume, and its public domain requires access to the owner's Railway account
-and can incur charges. No cloud resources are created by this repository.
+The Netlify site is a static frontend backed by the single-replica Railway CPU
+service at `https://ghost-trials-api-production.up.railway.app`. Both deployment
+and persistent `/data` volume exist; verify `/health` and a signed-in Hunt after
+each release. The service and network usage can incur Railway charges.
 
 Before exposing the service, attach persistent storage at `/data` and configure
 the backend with these variables (along with an owner-controlled Railway
@@ -54,9 +52,8 @@ GHOST_JUDGE_PROVIDER=cpu
 GHOST_EXECUTION_BACKEND=mujoco_cpu
 GHOST_PUBLIC_DEPLOYMENT=true
 GHOST_CUSTOMER_AUTH_REQUIRED=true
-GHOST_AUTH_PROVIDER=dynamic
-DYNAMIC_ENVIRONMENT_ID=<Dynamic environment UUID>
-DYNAMIC_JWT_AUDIENCE=https://ghost-trials.netlify.app
+GHOST_AUTH_PROVIDER=privy
+PRIVY_APP_ID=<your Privy public app ID>
 GHOST_COOKIE_SECURE=true
 GHOST_ALLOWED_ORIGINS=https://ghost-trials.netlify.app,https://<backend-domain>
 GHOST_DATA_PATH=/data/state.sqlite3
@@ -64,10 +61,9 @@ GHOST_ARTIFACT_ROOT=/data/artifacts
 RAILWAY_RUN_UID=0
 ```
 
-Enable email and Google in the Dynamic dashboard, allow the Netlify frontend
-origin, and set that same origin as the Dynamic JWT audience. The application
-also supports the existing Privy integration: use `GHOST_AUTH_PROVIDER=privy`
-and `PRIVY_APP_ID` instead. Do not set a provider ID for an app you do not own.
+Enable the desired sign-in methods in the connected Privy app and allow the
+Netlify origin. Dynamic remains an alternative identity adapter, not the
+currently used path. Do not set a provider ID for an app you do not own.
 The backend refuses to start with `GHOST_PUBLIC_DEPLOYMENT=true` if individual
 sign-in, secure cookies, or exact HTTPS origins are missing. Railway volumes
 are initially root-owned: set `RAILWAY_RUN_UID=0` for the service. The container
@@ -75,8 +71,8 @@ entrypoint assigns its dedicated `/data` mount, then runs FastAPI as UID 10001.
 Keep exactly one replica because the state store uses SQLite and an exclusive
 process lease. Back up the volume off-host.
 
-Only after `/health` returns 200 from the permanent backend, set the Netlify
-production build variable `GHOST_BACKEND_ORIGIN` to that origin and redeploy.
+Keep the Netlify production build variable `GHOST_BACKEND_ORIGIN` pointed at
+the stable Railway origin and redeploy the frontend when static assets change.
 Check that Netlify `/health` returns 200, unauthenticated `/trials` returns 401,
 and an authenticated user can start and inspect a CPU Hunt. A Git push alone
 does not invoke the repository's manual frontend deployment workflow.
@@ -100,4 +96,4 @@ uv run pytest -q
 
 ## Optional integrations and limits
 
-The existing Cosmos video, Nemotron judge, SONIC/Isaac worker, hardware capture, Privy/Dynamic authentication, and deployment paths remain available. They are not invoked by the CPU path. The old G1 policy action spaces are not interchangeable with this gantry controller. CPU mode does not create Cosmos video or Nemotron commentary. It is a physically simulated manipulation benchmark, not a hardware trial, a G1 benchmark, or a safety certification. Neural checkpoints outside the declared JSON observation/action contract remain unsupported.
+The existing Cosmos video, GPU Nemotron judge, SONIC/Isaac worker, hardware capture, and Privy/Dynamic authentication paths remain available. CPU physics never requires them. An optional **separate** Nebius/Nemotron CPU reviewer calls one Super model per verified trial only when its explicit enable switch, credentials, budgets, and operator-confirmed provider spending controls are present. The review cannot change the deterministic task outcome and does not cause a synthetic fallback. The old G1 policy action spaces are not interchangeable with this gantry controller. CPU mode does not create Cosmos video. It is a physically simulated manipulation benchmark, not a hardware trial, a G1 benchmark, or a safety certification. Neural checkpoints outside the declared JSON observation/action contract remain unsupported.

@@ -125,7 +125,9 @@ pipeline.require_robot_evidence = any(p != "local" for p in (
     settings.ghost_scenario_provider, settings.ghost_simulator_provider, settings.ghost_judge_provider))
 if settings.ghost_simulator_provider == "mujoco_cpu":
     from .cpu_evidence import CpuEvidenceRepository
+    from .cpu_review import CpuNemotronReviewer
     pipeline.evidence_repository = CpuEvidenceRepository(settings)
+    pipeline.model_reviewer = CpuNemotronReviewer(settings, store)
 elif settings.ghost_simulator_provider == "isaac_http":
     from .artifacts import EvidenceRepository
     pipeline.evidence_repository = EvidenceRepository(settings)
@@ -453,6 +455,12 @@ async def capabilities():
         from .cpu_robot import available_policies
         return {"mode": settings.ghost_mode, "video_generation_enabled": False,
                 "robot_execution_enabled": True, "judge_provider": "cpu",
+                "cpu_model_review_enabled": settings.ghost_cpu_model_review_enabled,
+                "cpu_model_review_ready": bool(settings.ghost_cpu_model_review_enabled
+                    and settings.nebius_api_key and settings.ghost_live_execution_enabled
+                    and settings.ghost_provider_spending_controls_confirmed
+                    and settings.ghost_platform_budget_cents >= settings.ghost_cpu_model_review_reservation_cents),
+                "cpu_model_review_model": settings.nebius_super_model if settings.ghost_cpu_model_review_enabled else None,
                 "live_execution_enabled": True, "admission_controls_configured": True,
                 "execution_verified_by_this_check": False,
                 "configured_checkpoint_digest": cpu_controller(settings.ghost_policy_name).digest,
@@ -698,6 +706,14 @@ async def safety_score(request: Request):
     result = summarize(trials)
     eligible_groups = [g for g in groups if g["scored_trials"] > 0]
     available = len(eligible_groups) == 1
+    if settings.ghost_simulator_provider == "mujoco_cpu":
+        from .evaluation import score_exclusion_reasons
+        eligible = [trial for trial in trials if not score_exclusion_reasons(trial)]
+        task_rate = round(sum(bool(trial.metrics.task_completed) for trial in eligible) / len(eligible), 3) if eligible and available else None
+        return SafetyScore(**{**result, "safety_score": task_rate},
+                           policy_name=eligible_groups[0]["policy_name"] if available else "No single eligible task cohort",
+                           score_available=available, score_kind="task_success_rate", groups=groups,
+                           limitations=LIMITATIONS + ["CPU score is the observed task-completion fraction within one tested cohort, not robot safety."])
     return SafetyScore(**{**result, "safety_score": eligible_groups[0]["safety_score"] if available else None},
                        policy_name=eligible_groups[0]["policy_name"] if available else "No single eligible evaluation cohort",
                        score_available=available, groups=groups, limitations=LIMITATIONS)
