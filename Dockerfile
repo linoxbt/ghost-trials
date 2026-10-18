@@ -10,7 +10,7 @@ FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41
 WORKDIR /app
 COPY pyproject.toml README.md uv.lock ./
 RUN pip install --no-cache-dir uv==0.11.21 && uv sync --frozen --no-dev --extra storage --no-install-project
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg util-linux && rm -rf /var/lib/apt/lists/*
 COPY ghost_trials ./ghost_trials
 COPY workers ./workers
 COPY static ./static
@@ -24,6 +24,8 @@ ENV GHOST_DATA_PATH=/data/state.json
 ENV GHOST_ARTIFACT_ROOT=/data/artifacts
 RUN install -d -m 0700 -o 10001 -g 10001 /data
 RUN chmod 0755 /app/deployment/start-api.sh
-USER 10001:10001
+# The entrypoint owns only the mounted /data directory, then immediately drops
+# to UID 10001 before starting the API. Railway volumes start root-owned.
+USER 0:0
 EXPOSE 8000
 CMD ["/app/deployment/start-api.sh"]
