@@ -36,7 +36,7 @@ For an existing checkout whose private `.env` still selects GPU providers, use `
 ### Public CPU backend
 
 The Netlify site is a static frontend backed by the single-replica Railway CPU
-service at `https://ghost-trials-api-production.up.railway.app`. Both deployment
+service at `https://ghost-trials-production.up.railway.app`. Both deployment
 and persistent `/data` volume exist; verify `/health` and a signed-in Hunt after
 each release. The service and network usage can incur Railway charges.
 
