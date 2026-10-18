@@ -88,6 +88,15 @@ GHOST_CPU_MODEL_REVIEW_RESERVATION_CENTS=10
 
 Use the exact model ID shown in the current Token Factory catalog. An operator must also allocate the signed-in organization a budget through the existing `/ops/organizations/{organization_id}/budget` route. The 200-cent platform limit is an **admission reservation ceiling, not a billing guarantee**; confirm credit-only use or a provider-side hard limit before enabling live calls. No automatic Ultra escalation occurs in this CPU path. A missing key, budget exhaustion, timeout or invalid model citation leaves the measured MuJoCo trial complete and visibly marks its separate model review unavailable or failed. The older GPU path still uses the two-pass Super/Ultra judge.
 
+Run one retained operator acceptance trial before turning on review for customer workspaces. The first command executes actual MuJoCo physics and verifies evidence without a paid call. The second makes at most one bounded Super call **only after** the operator confirms credit-only billing or a provider-side hard limit; the local 10-cent reservation is not an external billing cap:
+
+```bash
+uv run --extra physics python -m scripts.cpu_live_review --output /tmp/ghost-cpu-acceptance
+uv run --extra physics python -m scripts.cpu_live_review --output /tmp/ghost-cpu-nebius-acceptance --env-file /path/to/private/.env --live-nebius --confirm-provider-limit
+```
+
+Use a new output directory for each command. Both save their SQLite record and raw evidence. `scripts/export_cpu_reference.py` produced the public reference bundle under `static/reference/gantry-v1/` from a separately executed, trace-validated CPU trial. The overview labels this reference as outside the signed-in organization's results; a new user can launch a guided six-trial physics Hunt to populate their own workspace.
+
 ## Production adapter boundary
 
 The pipeline defines three interfaces in `ghost_trials/adapters.py`:

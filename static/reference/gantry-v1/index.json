@@ -1,0 +1,25 @@
+{
+  "kind": "public_reference_cpu_simulation",
+  "customer_score_eligible": false,
+  "scope": "Project reference controller and MuJoCo tabletop only; not G1 or hardware",
+  "trial_id": "trl_45b832ac0b5c",
+  "policy_name": "gantry-push-v1",
+  "checkpoint_digest": "sha256:79db89f680dfdac713f317635c7f5773f591c24977df6af5c0e9b8479b54a734",
+  "simulator_version": "MuJoCo 3.14.0; ghost-gantry-xy-v1",
+  "seed": 42,
+  "task_completed": true,
+  "object_final_x_m": 0.729056,
+  "simulation_duration_s": 3.0,
+  "evidence_verification": "cpu_trace_metrics_verified",
+  "model_review_status": "not_requested",
+  "artifact_files": [
+    "recipe.json",
+    "summary.json",
+    "telemetry.jsonl",
+    "trajectory.svg",
+    "manifest.json",
+    "verification.json",
+    "scenario.json"
+  ],
+  "reproduce": "uv run --extra physics python -m scripts.cpu_live_review --output /tmp/ghost-reference-replay --seed 42"
+}
