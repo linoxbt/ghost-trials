@@ -99,6 +99,21 @@ async def test_cpu_review_rejects_unverified_and_invented_metric(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_cpu_review_distinguishes_truncated_provider_output(tmp_path):
+    settings, store, scenario, trial = await verified_trial(tmp_path)
+    reviewer = CpuNemotronReviewer(settings, store, httpx.MockTransport(lambda _: httpx.Response(200, json={
+        "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 512},
+    })))
+    review = await reviewer.review(trial, scenario)
+    assert review.status == "invalid_response"
+    assert review.failure_detail == "truncated_output"
+    assert review.provider_finish_reason == "length"
+    assert review.completion_tokens == 512
+    assert trial.metrics.task_completed is True
+
+
+@pytest.mark.asyncio
 async def test_cpu_pipeline_finishes_measured_trial_when_nebius_fails(tmp_path):
     settings, store, _, _ = await verified_trial(tmp_path)
     pipeline = CertificationPipeline(store, CpuScenarioGenerator(), CpuMujocoSimulator(),
