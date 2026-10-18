@@ -92,18 +92,36 @@ class CpuNemotronReviewer:
                         "temperature": 0.1, "max_tokens": self.settings.ghost_cpu_model_review_max_tokens})
                 response.raise_for_status()
             payload = response.json()
-            answer = CpuReviewAnswer.model_validate_json(payload["choices"][0]["message"]["content"])
+            choice = payload["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            usage = payload.get("usage") or {}
+            diagnostic = {"provider_finish_reason": finish_reason,
+                          "prompt_tokens": usage.get("prompt_tokens"),
+                          "completion_tokens": usage.get("completion_tokens"),
+                          "latency_ms": round((time.monotonic()-started)*1000)}
+            content = choice["message"].get("content")
+            if finish_reason == "length":
+                return ModelReview(status="invalid_response", failure_detail="truncated_output",
+                                   **diagnostic, **base)
+            if not isinstance(content, str) or not content.strip():
+                return ModelReview(status="invalid_response", failure_detail="empty_content",
+                                   **diagnostic, **base)
+            try:
+                answer = CpuReviewAnswer.model_validate_json(content)
+            except ValueError as exc:
+                detail = "malformed_json" if "Invalid JSON" in str(exc) else "invalid_schema"
+                return ModelReview(status="invalid_response", failure_detail=detail,
+                                   **diagnostic, **base)
             if any(key not in values or type(value) is not type(values[key])
                    or value != values[key] for key, value in answer.cited_metrics.items()):
-                return ModelReview(status="invalid_response", latency_ms=round((time.monotonic()-started)*1000), **base)
-            usage = payload.get("usage") or {}
+                return ModelReview(status="invalid_response", failure_detail="metric_mismatch",
+                                   **diagnostic, **base)
             return ModelReview(status="complete", suggested_outcome=answer.suggested_outcome,
                 interpretation=answer.interpretation, cited_metrics=answer.cited_metrics,
                 self_reported_confidence=answer.confidence,
                 disagrees_with_measurement=answer.suggested_outcome not in {
                     evidence["deterministic_outcome"], "insufficient_evidence"},
-                prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"),
-                latency_ms=round((time.monotonic()-started)*1000), reviewed_at=utc_now(), **base)
+                reviewed_at=utc_now(), **diagnostic, **base)
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             status = "provider_error" if isinstance(exc, httpx.HTTPError) else "invalid_response"
             return ModelReview(status=status, latency_ms=round((time.monotonic()-started)*1000), **base)

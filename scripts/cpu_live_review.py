@@ -87,6 +87,8 @@ async def run(output: Path, *, live_nebius: bool, seed: int = 42,
         "model_evidence_digest": review.evidence_digest if review and review.status == "complete" else None,
         "prompt_tokens": review.prompt_tokens if review and review.status == "complete" else None,
         "completion_tokens": review.completion_tokens if review and review.status == "complete" else None,
+        "model_failure_detail": review.failure_detail if review else None,
+        "provider_finish_reason": review.provider_finish_reason if review else None,
         "output_directory": str(output.resolve()),
     }
     (output / "validation-report.json").write_text(json.dumps(report, indent=2) + "\n")

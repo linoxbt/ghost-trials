@@ -105,6 +105,8 @@ class ModelReview(BaseModel):
     completion_tokens: int | None = Field(default=None, ge=0)
     latency_ms: int | None = Field(default=None, ge=0)
     reviewed_at: datetime | None = None
+    failure_detail: Literal["truncated_output", "empty_content", "malformed_json", "invalid_schema", "metric_mismatch"] | None = None
+    provider_finish_reason: str | None = None
 
 
 class Trial(BaseModel):
