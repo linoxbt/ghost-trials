@@ -1,5 +1,7 @@
 # Additional info — judges and organizers
 
+> Historical draft. Use the current field-by-field answers in [submission.md](../../submission.md); this file predates the completed live Nemotron-reviewed CPU trial.
+
 Prepared for the supplied Devpost form. Copy the answer paragraphs, not the editorial instructions. Replace every bracketed placeholder and confirm personal/legal fields yourself. Ratings must reflect your own assessment; no rating or cross-model benchmark has been invented here.
 
 ## Upload a File

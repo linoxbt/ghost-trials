@@ -1,6 +1,6 @@
 # Ghost Trials — Devpost submission package
 
-Updated October 16, 2026. This package distinguishes the demonstrated CPU MuJoCo Hunt from optional, unvalidated G1/Cosmos integrations. Refresh its evidence status after the final deployed Nebius run.
+**Superseded working drafts (October 16, 2026).** Use the current root [submission.md](../../submission.md) for Devpost text and [submission.pdf](../../submission.pdf) for the judge-facing technical dossier. The documents below predate the live Nemotron-reviewed CPU trial and should not be pasted into Devpost without reconciliation. G1/Cosmos integrations remain unvalidated.
 
 ## Project overview
 

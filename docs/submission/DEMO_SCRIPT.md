@@ -1,5 +1,7 @@
 # Ghost Trials — live CPU Hunt demo runbook
 
+> Historical planning draft. The current video outline and model-review status are in [submission.md](../../submission.md). Record only modules actually running in the final signed-in deployment.
+
 Target: **2:45** total, public YouTube upload. The Physical AI rules call for at least one minute of key application modules actually running when no physical hardware is used. Record the real app and API; do not substitute a fixture, landing-page animation or generated scenario image for policy execution.
 
 ## Before recording

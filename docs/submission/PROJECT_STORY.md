@@ -1,5 +1,7 @@
 # Ghost Trials — Devpost project story
 
+> Historical draft. The current Devpost copy, including the completed live Nemotron-reviewed CPU trial, is in [submission.md](../../submission.md).
+
 ## Inspiration
 
 Robot policies can look reliable in a small set of demonstrations and still fail when physical conditions change. A useful evaluator should search those conditions, preserve what actually happened, and make a failure easy to repeat against the next controller. Ghost Trials is an experimental red-team platform for that job—not a safety-certification authority.
