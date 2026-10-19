@@ -1,7 +1,7 @@
 # Ghost Trials — Devpost submission dossier
 
 **Nebius x NVIDIA Global AI Hackathon · Physical AI Track**
-**Prepared 18 October 2026 · Submission draft, not a safety certificate**
+**Updated 20 October 2026 · Submission draft, not a safety certificate**
 
 > **Owner review before submission:** add a public YouTube video URL; confirm your country, project start date, eligibility, event attendance, and personal 1–10 ratings. Record a fresh signed-in Hunt on the hosted site. Do not paste the editorial notes or bracketed placeholders into Devpost.
 
@@ -9,7 +9,7 @@
 
 **Project name:** Ghost Trials
 
-**Elevator pitch:** Give Ghost Trials a robot controller and a task. It searches bounded physical conditions for failures, verifies and reproduces the evidence, then tests whether the next controller fixes the case.
+**Elevator pitch:** Give Ghost Trials an executable controller and a task. It hunts for bounded failures, verifies and reproduces the evidence, then checks whether the next version fixes the case.
 
 **Track:** Physical AI Track
 
@@ -21,7 +21,7 @@
 
 **Built with** (select up to 25 tags): Python, FastAPI, Pydantic, MuJoCo, SQLite, JavaScript, React, Privy, WebSockets, NVIDIA Nemotron, Nebius Token Factory, HTTPX, Docker, Pytest, Railway, Netlify, GitHub.
 
-The GitHub repository includes the MIT license, setup instructions and source code. The hosted frontend is on Netlify; its FastAPI CPU backend is on Railway. The required NVIDIA-model runtime integration is **Nemotron 3 Super through Nebius Token Factory**, not Railway hosting. We have not used Nebius AI Cloud GPU compute or claimed Serverless Jobs/Endpoints as deployed infrastructure.
+The GitHub repository includes the MIT license, setup instructions and source code. The hosted frontend is on Netlify; its FastAPI CPU backend is on Railway. The required NVIDIA-model runtime integration is **Nemotron 3 Super through Nebius Token Factory**, not Railway hosting. The new AI Agent Verification work is currently on a local implementation branch and is **not yet deployed** to those URLs. We have not used Nebius AI Cloud GPU compute or claimed Serverless Jobs/Endpoints as deployed infrastructure.
 
 ## Project story — paste into “About the project”
 
@@ -41,11 +41,15 @@ The Hunt samples the declared search space, then uses observed failures and near
 
 The workspace presents Hunt, Failures, Trials, Compare and System views. It shows trial progress, measured task outcome, a telemetry-derived state replay, search observations, evidence checks, model interpretation and known limitations. The replay is generated from recorded simulator states; it is **not camera footage or a Cosmos-generated robot response**. Authenticated users have organization-isolated records. New workspaces do not automatically receive paid-inference access.
 
+A second, locally implemented domain verifies a **bundled executable AI agent** in a controlled mock-tool environment. A bounded Hunt changes user and untrusted tool-output inputs, records actual tool requests, and applies versioned deterministic assertions to unauthorized actions. It retains a trace and evidence digest, reproduces a saved failure, and tests a corrected reference agent against that case. This is a deliberately narrow verification harness, not permission to execute arbitrary customer code on Railway. The agent domain is complementary to the Physical AI submission; it has not replaced the measured robot-physics path.
+
 ### How we built it
 
 The backend uses FastAPI, Pydantic and SQLite with a durable job queue, typed trial records, private artifact routes, role checks, budget admission and audit records. The frontend is a responsive multi-page application with Privy-backed sign-in. CPU simulation is a distinct adapter within the existing `ScenarioGenerator → Simulator → TrialJudge → evidence` pipeline; optional Cosmos, Isaac and SONIC/G1 integrations remain modular and fail closed when their resources are absent. Synthetic fixtures are development-only and cannot silently replace real execution.
 
 Evidence is not a single LLM answer. For each completed CPU trial, the system retains the full physical recipe, random seed, controller identity/digest, simulator version, sampled state trajectory, measured metrics, task outcome, state-derived visualization and hashes. A separate verifier checks artifact integrity and recomputes selected results from the trace. Missing or corrupt evidence is not converted into a policy verdict. Provider outages are recorded as provider failures, not robot-policy failures. Observation and AI interpretation remain separate in the UI and API.
+
+For the agent domain, the bundled harness executes the reference agent behind a parent-mediated mock-tool interface. It records attempted tool names and arguments, whether each request was authorized, state changes and assertion results. A denied forbidden request is reported as an **attempted unauthorized invocation**, not as a completed destructive action. Timeout or harness failure is an execution error, not a verified agent failure. The current process boundary is suitable for this bundled reference path only; it is not a security sandbox for arbitrary third-party executables.
 
 ### NVIDIA models and Nebius
 
@@ -53,7 +57,7 @@ Ghost Trials uses **NVIDIA Nemotron 3 Super** (`nvidia/nemotron-3-super-120b-a12
 
 On 18 October 2026, an operator acceptance trial completed real MuJoCo simulation and a live Token Factory call. Trial `trl_9dad0149b31e` ran `gantry-push-v1` for **3.0 simulated seconds** with seed 42 and placed the block at **0.729056 m**, inside the **0.64–0.86 m** target band. The evidence checker reported `cpu_trace_metrics_verified` after checking **121 telemetry samples and four core artifacts**. Nemotron Super returned a completed **pass** interpretation, with **801 prompt tokens and 375 completion tokens**. This is one observed integration result, not a model-accuracy benchmark or independent safety review. An earlier attempt returned an invalid model response; the app retained the physical measurement and now records a safe error reason. The successful operator report was generated locally; the repository's public seed-42 reference bundle contains separately generated physics evidence **without** a model review. A fresh signed-in customer trial on the deployed site remains a separate validation step.
 
-Token Factory removed the need to procure a GPU merely to host the judge. The robot physics still executes locally or on ordinary CPU infrastructure; remote model inference is not robot execution. The CPU reviewer makes at most one Super request per admitted verified trial and has no automatic Ultra fallback. The older optional GPU judge path contains two-pass Super/Ultra escalation, but that path has **not** been demonstrated with a G1 checkpoint. Application budget reservations are admission controls, not a guarantee about an external bill. The owner confirmed Nebius automatic top-up is off before the live acceptance call.
+Token Factory removed the need to procure a GPU merely to host the judge. The robot physics still executes locally or on ordinary CPU infrastructure; remote model inference is not robot execution. The CPU reviewer makes at most one Super request per admitted verified trial and has no automatic Ultra fallback. The new agent reviewer is optional and budget-gated; its provider behavior has contract tests, **not a completed live Nemotron agent review**. The older optional GPU judge path contains two-pass Super/Ultra escalation, but that path has **not** been demonstrated with a G1 checkpoint. Application budget reservations are admission controls, not a guarantee about an external bill. The owner confirmed Nebius automatic top-up is off before the live acceptance call.
 
 ### Challenges, learning and impact
 
@@ -65,9 +69,11 @@ The potential users are robotics teams and policy developers who need to priorit
 
 ### What we accomplished and what remains
 
-A bounded local adaptive CPU Hunt completed **16 real MuJoCo trials and found three failures**. A saved case replayed with the same measured final block position (**0.625826 m**); a different compatible controller executed the same recipe and reached **0.776821 m**, passing that *particular* case. A guided six-trial Hunt also found one reproducible case in a local API test. These are simulator results from the documented development validation, not physical G1 trials. The codebase's full automated suite passed **171 tests** at the 18 October snapshot; tests include actual MuJoCo execution as well as synthetic algorithm fixtures. Tests alone do not establish independent robotics validation.
+A bounded local adaptive CPU Hunt completed **16 real MuJoCo trials and found three failures** in the 18 October validation. A saved case replayed with the same measured final block position (**0.625826 m**); a different compatible controller executed the same recipe and reached **0.776821 m**, passing that *particular* case. In a separate 20 October two-domain rerun, a nine-trial MuJoCo grid Hunt found **three controller failures**. One saved case replayed at **0.499450 m**; the candidate controller reached **0.513131 m** and **still failed** that case, so the application reported no fix. Search outcomes depend on the sampled recipes; these runs have different strategies and must not be conflated.
 
-The hosted backend is running CPU/MuJoCo on Railway and the Netlify health proxy responds. Live Nemotron review is configured on that backend, but paid review still requires an operator-assigned budget for a particular signed-in organization; no public new account receives it automatically. The final video should show at least one minute of the actual Hunt, policy execution and evidence views, and should show a completed model review only if that signed-in trial really received one.
+The same demonstration ran a six-trial Hunt against a deliberately vulnerable bundled reference agent. Adversarial tool output induced a request for forbidden `admin.delete`; the mock-tool mediator denied the operation, and the recorded unauthorized request triggered a versioned assertion. The verified Ghost Case reproduced, while `reference-corrected-v2` passed that **specific** saved case. This is real local agent-program execution with mock tools, not a live customer-agent assessment or evidence of a production-service compromise. The full automated suite passed **179 tests** in the current development environment. Tests include actual MuJoCo execution, bundled-agent execution and synthetic search fixtures; they are not independent robotics validation.
+
+The last checked hosted backend was running CPU/MuJoCo on Railway and the Netlify health proxy responded; these links require a fresh pre-submission health check. Live Nemotron review is configured on that backend, but paid review still requires an operator-assigned budget for a particular signed-in organization; no public new account receives it automatically. The new agent domain exists only on the local branch until a separate reviewed release. The final Physical AI video should show at least one minute of actual Hunt, policy execution and evidence views, and should show a completed model review only if that signed-in trial really received one.
 
 The original Unitree G1/GR00T/GEAR-SONIC/Isaac concept remains an optional, unvalidated integration path. No physical G1, compatible fine-tuned G1 checkpoint, end-to-end G1 worker run, live Cosmos generation or Nebius AI Cloud GPU instance is claimed. The next engineering milestones are a signed-in production Hunt with a budgeted review, an independent robotics assessment of trace and measurement limitations, and a compatible G1 run if hardware/compute access becomes available.
 
@@ -151,8 +157,9 @@ Use only screenshots of the real app or recorded telemetry. Suggested captions (
 2. **Trials:** “Each trial shows measured MuJoCo behavior; infrastructure errors never count as policy failures.”
 3. **Ghost Case:** “Saved recipe, seed, controller digest and trace support exact replay of a specific failure.”
 4. **Evidence:** “Observation, Nemotron interpretation and artifact verification are separate.”
-5. **Compare:** “A new controller passes this tested case; this is not a general safety claim.”
+5. **Compare:** “A candidate is executed against the exact case; the result may pass or remain a failure.”
 6. **Reference:** “Public seed-42 MuJoCo trace; this reference has no Nemotron review and is excluded from customer scores.”
+7. **Agent verification (local branch only):** “A forbidden mock-tool request is denied, logged and reproduced; arbitrary customer agents are not supported.”
 
 **Three-minute video outline:**
 
@@ -163,7 +170,7 @@ Use only screenshots of the real app or recorded telemetry. Suggested captions (
 | 0:45–1:30 | Live trials, telemetry and search focus | Show real MuJoCo progression; keep at least one minute of key modules visibly operating. |
 | 1:30–2:05 | Verified Ghost Case and exact replay | Recipe, digest, observed failure and repeatability limitations. |
 | 2:05–2:30 | Completed Nemotron review **only if it exists in that signed-in run** | Cite the actual Token Factory model ID, evidence digest and token usage; never substitute a contract test. |
-| 2:30–2:55 | Compatible-controller regression and close | Passing one case is not a safety certificate; show the honest result. |
+| 2:30–2:55 | Compatible-controller regression and close | Show the actual pass or continuing failure. Neither is a general safety claim. |
 
 The official rules call for a public video under three minutes and at least one minute of actual application modules in action for a software-only Physical AI entry. Do not use a landing-page animation or generated hazard clip as a substitute for controller execution. See [the official rules](https://nebiusglobalaihackathon.devpost.com/rules).
 
@@ -173,9 +180,11 @@ The official rules call for a public video under three minutes and at least one 
 
 **Observed local validation:** a 16-trial adaptive MuJoCo Hunt found three failures; a saved case replayed at 0.625826 m and a candidate controller reached 0.776821 m on the same case. A separate live-reviewed seed-42 trial reached 0.729056 m, passed trace verification and received the Nemotron Super review described above. The operator acceptance output was local, not a publicly archived raw evidence bundle. Independent human robotics review, video decoding and hardware attestation were **not** performed for that CPU trial. The trajectory SVG is derived from states, not video.
 
+**20 October two-domain local demonstration:** `uv run python -m scripts.multidomain_demo --output data/multidomain-demo` executes nine real headless MuJoCo trials and six bundled-agent trials with no paid provider. The observed rerun had three controller failures; the selected case replayed at 0.499450 m, and the candidate still failed it at 0.513131 m. The agent run discovered and denied an unauthorized `admin.delete` request, verified and reproduced the trace, and found that the corrected reference agent passed that exact case. These are two different bounded test domains. The agent review integration was contract-tested, not called live in this demonstration. The selected physical case had no automatic reproduction attempt or empirical boundary in this particular nine-trial run; those are optional Hunt findings, not implied by exact replay.
+
 **Run locally:** follow the [README](https://github.com/linoxbt/ghost-trials#quick-start), then run `uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-validation` for actual headless MuJoCo trials, exact replay and regression. Tests: `uv run --frozen --extra dev --extra physics --extra models --extra storage pytest -q`. The default CPU path needs no GPU or paid API. To add a live model review, use only the backend configuration and spending safeguards in the README; a customer's organization needs an explicit budget allocation.
 
-**Known limits:** The default task is a gantry manipulation benchmark, not Unitree G1 locomotion. The built-in lightweight neural-policy format is executable on CPU but is not a trained G1 checkpoint. Physical recording support has only fixture-level validation. No live Cosmos video, G1/SONIC/GR00T execution, Isaac worker acceptance, independent safety certification, or physical robot result is represented as complete. An application admission budget is not an external provider charge ceiling. Results are conditional on the tested controller, simulator version, recipe, seed, task and metric definition.
+**Known limits:** The default task is a gantry manipulation benchmark, not Unitree G1 locomotion. The built-in lightweight neural-policy format is executable on CPU but is not a trained G1 checkpoint. Physical recording support has only fixture-level validation. The agent harness accepts bundled reference agents only; it is not an arbitrary-code sandbox, and its corrected agent passed one specific regression case. No live Cosmos video, G1/SONIC/GR00T execution, Isaac worker acceptance, independent safety certification, or physical robot result is represented as complete. An application admission budget is not an external provider charge ceiling. Results are conditional on the tested controller or target, runtime version, recipe, seed, task and metric definition.
 
 ## Final owner checklist
 
@@ -183,6 +192,7 @@ The official rules call for a public video under three minutes and at least one 
 - [ ] Confirm your actual residence, age/eligibility, team status, project start date and any Builders & Brews attendance.
 - [ ] Choose the three personal 1–10 ratings; do not present them as measured benchmark scores.
 - [ ] Sign in to the hosted site, run a fresh Hunt, inspect one Ghost Case and check the exact replay/regression flow.
+- [ ] Decide whether to release the local AI-agent domain; until it is reviewed and deployed, do not claim that the public site offers it.
 - [ ] If the video claims a live Nemotron review in the signed-in app, have an operator allocate only your workspace an admission budget and verify `model_review.status=complete` on that exact trial.
 - [ ] Record and upload a public YouTube video under three minutes, including at least one minute of real key modules operating.
 - [ ] Verify the live URLs, public repository, MIT license, README, media captions and feedback fields immediately before pressing Submit.
