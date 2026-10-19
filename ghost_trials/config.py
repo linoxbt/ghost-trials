@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ghost_simulator_provider: str = "mujoco_cpu"
     ghost_judge_provider: str = "cpu"
     ghost_cpu_model_review_enabled: bool = False
+    ghost_agent_model_review_enabled: bool = False
     ghost_cpu_model_review_reservation_cents: int = Field(default=10, ge=1, le=200)
     ghost_cpu_model_review_max_tokens: int = Field(default=512, ge=128, le=1024)
     ghost_cpu_model_review_timeout_seconds: float = Field(default=20, ge=1, le=60)

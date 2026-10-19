@@ -132,7 +132,7 @@ class AccessControl:
 
     async def middleware(self, request, call_next):
         path = request.url.path
-        public = path in {"/", "/docs", "/docs/", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite"} or path.startswith("/assets/") or path.startswith("/app")
+        public = path in {"/", "/docs", "/docs/", "/docs/agent", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite"} or path.startswith("/assets/") or path.startswith("/app")
         request.state.principal = self.principal(request)
         if self.enabled and not public:
             role = self.role(request)
