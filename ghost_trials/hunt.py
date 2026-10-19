@@ -142,6 +142,8 @@ class ReproductionResult(BaseModel):
 
 
 class GhostCase(BaseModel):
+    domain: Literal["physical_ai"] = "physical_ai"
+    adapter_version: str = "physical-hunt-v1"
     case_id: str
     hunt_id: str
     organization_id: str
@@ -186,6 +188,8 @@ class RegressionResult(BaseModel):
 
 
 class Hunt(BaseModel):
+    domain: Literal["physical_ai"] = "physical_ai"
+    adapter_version: str = "physical-hunt-v1"
     hunt_id: str
     organization_id: str
     objective: HuntObjective

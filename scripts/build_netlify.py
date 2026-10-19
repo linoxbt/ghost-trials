@@ -28,10 +28,12 @@ def main() -> None:
     (TARGET / "app" / "index.html").write_text(workspace)
     (TARGET / "docs").mkdir(exist_ok=True)
     (TARGET / "docs" / "index.html").write_bytes((SOURCE / "docs.html").read_bytes())
+    (TARGET / "docs" / "agent").mkdir(exist_ok=True)
+    (TARGET / "docs" / "agent" / "index.html").write_bytes((SOURCE / "agent-guide.html").read_bytes())
 
     exact = ("health", "capabilities", "scenarios", "trials", "hunts", "ghost-cases", "failure-families", "safety-score",
-             "benchmarks", "comparisons", "openapi.json", "api/docs", "api/redoc", "ready", "account", "organizations")
-    wildcards = ("trials/*", "hunts/*", "ghost-cases/*", "artifacts/*", "generated/*", "auth/*", "ops/*", "organizations/*", "physical/*")
+             "benchmarks", "comparisons", "openapi.json", "api/docs", "api/redoc", "ready", "account", "organizations", "agent-targets")
+    wildcards = ("trials/*", "hunts/*", "ghost-cases/*", "agent-trials/*", "artifacts/*", "generated/*", "auth/*", "ops/*", "organizations/*", "physical/*")
     rules = [f"/{path} {ORIGIN}/{path} 200!" for path in exact]
     rules.extend(f"/{path} {ORIGIN}/{path.replace('*', ':splat')} 200!" for path in wildcards)
     (TARGET / "_redirects").write_text("\n".join(rules) + "\n")

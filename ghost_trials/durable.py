@@ -95,7 +95,7 @@ class DurableStore(TrialStore):
         self.trials[trial.trial_id] = trial
 
     def put_domain(self, kind: str, record_id: str, payload: str):
-        if kind not in {"hunt", "ghost_case", "regression"}:
+        if kind not in {"hunt", "ghost_case", "regression", "agent_trial", "agent_target", "agent_reservation", "agent_review"}:
             raise ValueError("Unsupported domain record")
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO records VALUES(?,?,?)", (kind, record_id, payload))

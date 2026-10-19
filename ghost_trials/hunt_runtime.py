@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import uuid
+import time
+import random
 
 from .adapters import ExecutionBlocked
-from .hunt import (GhostCase, Hunt, HuntObjective, HuntPlanner, HuntStatus, PolicyVersion,
+from .hunt import (GhostCase, Hunt, HuntObjective, HuntPlanner, HuntStatus, PolicyVersion, TrialCandidate,
                    SearchSpace, case_from_trial, default_space, empirical_boundary,
                    observed_outcome, reproduction_result)
 from .models import ScenarioCreate, TrialStatus
+from .agent_verification import (AgentHunt, AgentHuntObjective, AgentSearchSpace, AgentTarget,
+                                 AgentPolicy, AgentTrial, AgentGhostCase, AgentVerdict,
+                                 TARGETS, OBJECTIVE_VARIANTS, OBJECTIVE_ASSERTIONS,
+                                 execute_reference, make_scenario, verify_trial)
 from workers.isaac.hazards import parameterize_hazard
 
 
@@ -32,19 +39,41 @@ class HuntService:
         self.store, self.pipeline, self.settings = store, pipeline, settings
         self.admission, self.admission_lock = admission, admission_lock
         self.tasks: dict[str, asyncio.Task] = {}
+        self.agent_slots = asyncio.Semaphore(2)
 
-    def get(self, hunt_id: str) -> Hunt | None:
+    def get(self, hunt_id: str) -> Hunt | AgentHunt | None:
         raw = self.store.get_domain("hunt", hunt_id)
-        return Hunt.model_validate_json(raw) if raw else None
+        if not raw:
+            return None
+        return (AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)
 
-    def list(self, organization_id: str) -> list[Hunt]:
+    def list(self, organization_id: str) -> list[Hunt | AgentHunt]:
         return [hunt for raw in self.store.list_domain("hunt")
-                if (hunt := Hunt.model_validate_json(raw)).organization_id == organization_id]
+                if (hunt := (AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)).organization_id == organization_id]
 
-    def save(self, hunt: Hunt):
+    def save(self, hunt: Hunt | AgentHunt):
         from .models import utc_now
-        hunt.updated_at = utc_now().isoformat()
+        hunt.updated_at = time.time() if isinstance(hunt, AgentHunt) else utc_now().isoformat()
         self.store.put_domain("hunt", hunt.hunt_id, hunt.model_dump_json())
+
+    def create_agent(self, organization_id: str, target_id: str, objective: AgentHuntObjective,
+                     max_trials: int, strategy: str, policy: AgentPolicy | None = None,
+                     search_space: AgentSearchSpace | None = None, max_wall_seconds: int = 60) -> AgentHunt:
+        target = AgentTarget(target_id=target_id, organization_id=organization_id,
+                             name=target_id, version=TARGETS[target_id]) if target_id in TARGETS else None
+        if target is None:
+            raise ValueError("Only bundled reference agents are supported; external code execution is blocked")
+        permitted = OBJECTIVE_VARIANTS[objective.verification_objective]
+        space = search_space or AgentSearchSpace(attack_variants=sorted(permitted))
+        if not set(space.attack_variants) <= permitted:
+            raise ValueError("Candidate variants must match the selected verification objective")
+        hunt = AgentHunt(hunt_id=f"hunt_{uuid.uuid4().hex[:12]}", organization_id=organization_id,
+                         objective=objective, target=target, policy=policy or AgentPolicy(),
+                         search_space=space, strategy=strategy,
+                         max_trials=max_trials, max_wall_seconds=max_wall_seconds)
+        self.store.put_domain("agent_target", target.target_id + ":" + organization_id, target.model_dump_json())
+        self.save(hunt)
+        return hunt
 
     def create(self, organization_id: str, objective: HuntObjective, max_trials: int,
                strategy: str, search_space: SearchSpace | None = None, policy_id: str | None = None) -> Hunt:
@@ -108,7 +137,7 @@ class HuntService:
     def recover(self):
         # Never automatically resume a possibly billed sequence after restart.
         for raw in self.store.list_domain("hunt"):
-            hunt = Hunt.model_validate_json(raw)
+            hunt = (AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)
             if hunt.status in {HuntStatus.QUEUED, HuntStatus.RUNNING}:
                 hunt.status = HuntStatus.INTERRUPTED
                 hunt.provider_errors.append("Hunt interrupted; inspect in-flight job before explicit resume")
@@ -117,6 +146,9 @@ class HuntService:
     async def run(self, hunt_id: str, subject: str):
         hunt = self.get(hunt_id)
         if not hunt or hunt.status not in {HuntStatus.QUEUED, HuntStatus.INTERRUPTED}:
+            return
+        if isinstance(hunt, AgentHunt):
+            await self.run_agent(hunt, subject)
             return
         hunt.status = HuntStatus.RUNNING
         self.save(hunt)
@@ -214,13 +246,168 @@ class HuntService:
             hunt.provider_errors.append(f"Hunt orchestration stopped ({type(exc).__name__}); review server logs and provider readiness")
             self.save(hunt)
 
-    def case(self, case_id: str) -> GhostCase | None:
+    def case(self, case_id: str) -> GhostCase | AgentGhostCase | None:
         raw = self.store.get_domain("ghost_case", case_id)
-        return GhostCase.model_validate_json(raw) if raw else None
+        if not raw:
+            return None
+        case = (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)
+        return self._checked_agent_case(case)
 
-    def cases(self, organization_id: str) -> list[GhostCase]:
-        return [case for raw in self.store.list_domain("ghost_case")
-                if (case := GhostCase.model_validate_json(raw)).organization_id == organization_id]
+    def cases(self, organization_id: str) -> list[GhostCase | AgentGhostCase]:
+        return [self._checked_agent_case(case) for raw in self.store.list_domain("ghost_case")
+                if (case := (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)).organization_id == organization_id]
+
+    def _checked_agent_case(self, case):
+        if isinstance(case, AgentGhostCase):
+            baseline = self.agent_trial(case.baseline_trial_id)
+            valid = bool(baseline and baseline.organization_id == case.organization_id
+                         and baseline.evidence_sha256 == case.evidence_sha256 and verify_trial(baseline))
+            case.evidence_verification = {"status": "verified" if valid else "invalid",
+                                          "oracle_version": "agent-oracle-v1"}
+        return case
+
+    def agent_trial(self, trial_id: str) -> AgentTrial | None:
+        raw = self.store.get_domain("agent_trial", trial_id)
+        return AgentTrial.model_validate_json(raw) if raw else None
+
+    def _agent_candidate(self, hunt: AgentHunt) -> TrialCandidate | None:
+        if len(hunt.candidates) >= hunt.max_trials:
+            return None
+        n = len(hunt.candidates) + 1
+        failures = [c for c in hunt.candidates if c.outcome == "failure"]
+        if hunt.strategy == "adaptive" and failures:
+            anchor = failures[0]
+            repeats = [c for c in hunt.candidates if c.phase == "reproduce" and c.controls == anchor.controls]
+            if len(repeats) < 2:
+                return TrialCandidate(sequence=n, phase="reproduce", controls=anchor.controls.copy(), seed=anchor.seed)
+            variant = int(anchor.controls["attack_variant"])
+            neighbors = [p for p in hunt.search_space.pressures if p != int(anchor.controls["pressure"])]
+            pressure = neighbors[sum(c.phase == "mutate" for c in hunt.candidates) % len(neighbors)] if neighbors else int(anchor.controls["pressure"])
+            phase = "mutate"
+        else:
+            variants = [v for v in (0, 2, 1, 3, 4) if v in hunt.search_space.attack_variants]
+            if hunt.strategy == "random":
+                rng = random.Random(f"{hunt.hunt_id}:{n}")
+                variant = rng.choice(variants)
+                pressure = rng.choice(hunt.search_space.pressures)
+            else:
+                variant = variants[(n - 1) % len(variants)]
+                pressure = hunt.search_space.pressures[((n - 1) // len(variants)) % len(hunt.search_space.pressures)]
+            phase = "explore"
+        seed = int(hashlib.sha256(f"{hunt.hunt_id}:{n}".encode()).hexdigest()[:8], 16) % 2_147_483_647
+        if phase in {"reproduce", "mutate"}:
+            seed = anchor.seed
+        return TrialCandidate(sequence=n, phase=phase,
+                              controls={"attack_variant": float(variant), "pressure": float(pressure)}, seed=seed)
+
+    async def run_agent(self, hunt: AgentHunt, subject: str):
+        hunt.status = HuntStatus.RUNNING
+        self.save(hunt)
+        deadline = time.monotonic() + hunt.max_wall_seconds
+        try:
+            while len(hunt.candidates) < hunt.max_trials and time.monotonic() < deadline:
+                candidate = hunt.candidates[-1] if hunt.candidates and hunt.candidates[-1].outcome is None else self._agent_candidate(hunt)
+                if candidate is None:
+                    break
+                if candidate not in hunt.candidates:
+                    hunt.candidates.append(candidate)
+                    self.save(hunt)
+                trial_id = candidate.trial_id or f"atrial_{uuid.uuid4().hex[:12]}"
+                candidate.trial_id = trial_id
+                self.save(hunt)
+                await self.admission_lock.acquire()
+                try:
+                    self.admission()
+                    if not self.store.get_domain("agent_reservation", trial_id):
+                        today = int(time.time() // 86400)
+                        used = sum(int(json.loads(raw)["at"] // 86400) == today
+                                   for raw in self.store.list_domain("agent_reservation"))
+                        if self.store.job_counts()["submitted_today"] + used >= self.settings.ghost_max_jobs_per_day:
+                            raise ValueError("Daily execution budget exhausted")
+                        self.store.put_domain("agent_reservation", trial_id, json.dumps({
+                            "organization_id": hunt.organization_id, "hunt_id": hunt.hunt_id, "at": time.time()}))
+                finally:
+                    self.admission_lock.release()
+                variant, pressure = int(candidate.controls["attack_variant"]), int(candidate.controls["pressure"])
+                if variant not in hunt.search_space.attack_variants or pressure not in hunt.search_space.pressures:
+                    raise ValueError("Persisted candidate exceeded the declared search space")
+                scenario = make_scenario(variant, pressure, candidate.seed)
+                trial = self.agent_trial(trial_id)
+                if trial is None:
+                    async with self.agent_slots:
+                        trial = await asyncio.to_thread(execute_reference, hunt.target, hunt.policy, scenario,
+                                                        hunt_id=hunt.hunt_id, trial_id=trial_id,
+                                                        objective=hunt.objective.verification_objective,
+                                                        timeout_s=min(3.0, max(.1, deadline - time.monotonic())))
+                    self.store.put_domain("agent_trial", trial_id, trial.model_dump_json())
+                    self.store.audit("agent_trial_completed", "operator", trial_id,
+                                     organization_id=hunt.organization_id, subject=subject)
+                if not verify_trial(trial):
+                    candidate.outcome = "insufficient_evidence"
+                    candidate.observation = "Evidence digest mismatch"
+                    hunt.status = HuntStatus.BLOCKED
+                elif trial.status == AgentVerdict.EXECUTION_ERROR:
+                    candidate.outcome = "provider_error"
+                    candidate.observation = trial.error
+                    hunt.provider_errors.append(f"{trial_id}: {trial.error}")
+                    hunt.status = HuntStatus.BLOCKED
+                elif trial.status == AgentVerdict.VERIFIED_FAILURE:
+                    candidate.outcome = "failure"
+                    candidate.observation = ", ".join(a.assertion_id for a in trial.assertions if not a.passed)
+                    if candidate.phase != "reproduce":
+                        case = AgentGhostCase(case_id=f"gcase_{uuid.uuid4().hex[:12]}", hunt_id=hunt.hunt_id,
+                                              organization_id=hunt.organization_id, baseline_trial_id=trial_id,
+                                              target=hunt.target, policy=hunt.policy,
+                                              objective=hunt.objective.verification_objective, scenario=scenario,
+                                              assertion_ids=[a.assertion_id for a in trial.assertions if not a.passed
+                                                             and a.assertion_id in OBJECTIVE_ASSERTIONS[hunt.objective.verification_objective]],
+                                              evidence_sha256=trial.evidence_sha256)
+                        self.store.put_domain("ghost_case", case.case_id, case.model_dump_json())
+                        hunt.case_ids.append(case.case_id)
+                else:
+                    candidate.outcome = "pass"
+                    candidate.observation = "All deterministic assertions passed"
+                if candidate.phase == "reproduce":
+                    for case_id in hunt.case_ids:
+                        case = self.case(case_id)
+                        if isinstance(case, AgentGhostCase) and case.scenario == scenario:
+                            if trial_id not in case.reproduction_trial_ids:
+                                case.reproduction_trial_ids.append(trial_id)
+                            attempts = [self.agent_trial(tid) for tid in case.reproduction_trial_ids]
+                            statuses = [t.status for t in attempts if t and verify_trial(t)]
+                            if len(statuses) != len(case.reproduction_trial_ids) or AgentVerdict.EXECUTION_ERROR in statuses:
+                                case.reproduction_status = "incomplete"
+                            elif len(statuses) < 2:
+                                case.reproduction_status = "incomplete"
+                            elif all(s == AgentVerdict.VERIFIED_FAILURE for s in statuses):
+                                case.reproduction_status = "reproducible"
+                            elif AgentVerdict.VERIFIED_FAILURE in statuses:
+                                case.reproduction_status = "flaky"
+                            else:
+                                case.reproduction_status = "not_reproduced"
+                            self.store.put_domain("ghost_case", case_id, case.model_dump_json())
+                candidate.evidence_class = "validated_agent_trace" if verify_trial(trial) else "invalid"
+                candidate.simulator_version = hunt.adapter_version
+                self.save(hunt)
+                if hunt.status == HuntStatus.BLOCKED:
+                    return
+            hunt.status = HuntStatus.COMPLETE if time.monotonic() < deadline else HuntStatus.INTERRUPTED
+            if hunt.status == HuntStatus.INTERRUPTED:
+                hunt.provider_errors.append("Hunt wall-time budget exhausted; no further trials executed")
+            self.save(hunt)
+        except asyncio.CancelledError:
+            hunt.status = HuntStatus.INTERRUPTED
+            self.save(hunt)
+            raise
+        except ValueError as exc:
+            hunt.status = HuntStatus.BLOCKED
+            hunt.provider_errors.append(str(exc) if str(exc) == "Daily execution budget exhausted"
+                                        else "Agent Hunt stopped (ValueError); no policy failure inferred")
+            self.save(hunt)
+        except Exception as exc:
+            hunt.status = HuntStatus.BLOCKED
+            hunt.provider_errors.append(f"Agent Hunt stopped ({type(exc).__name__}); no policy failure inferred")
+            self.save(hunt)
 
     def _update_reproduction(self, hunt: Hunt, candidate):
         matching = [c for c in hunt.candidates if c.phase == "reproduce" and c.controls == candidate.controls

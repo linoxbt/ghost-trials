@@ -24,6 +24,10 @@ from .security import AccessControl
 from .jobs import JobRunner
 from .hunt import HuntObjective, SearchSpace, HuntStatus, compare_case_regression, failure_families, default_space
 from .hunt_runtime import HuntService
+from .agent_verification import (AgentHunt, AgentHuntObjective, AgentSearchSpace, AgentPolicy,
+                                 AgentGhostCase, AgentTrial, AgentVerdict, TARGETS,
+                                 execute_reference, verify_trial)
+from .agent_review import AgentNemotronReviewer
 from .cpu_robot import CpuScenarioGenerator, CpuMujocoSimulator, CpuMeasuredJudge, BACKEND as CPU_BACKEND, controller as cpu_controller
 from .evaluation import (LIMITATIONS, benchmark_report, compare_trials, evidence_report, grouped_summary,
                          summarize, evidence_class, score_exclusion_reasons, reproducibility_report,
@@ -119,6 +123,7 @@ pipeline = CertificationPipeline(
 )
 runner = JobRunner(store, pipeline, settings)
 hunt_service = HuntService(store, pipeline, settings, None, submission_lock)
+agent_reviewer = AgentNemotronReviewer(settings, store)
 pipeline.redact_errors = True
 pipeline.physical_settings = settings
 pipeline.require_robot_evidence = any(p != "local" for p in (
@@ -419,6 +424,18 @@ def submission_allowed():
         raise HTTPException(429, "Job quota exceeded")
 
 
+def reserve_agent_execution(trial_id: str, organization_id: str):
+    """Admission for local agent replay/regression; called under submission_lock."""
+    submission_allowed()
+    today = int(time.time() // 86400)
+    used = sum(int(json.loads(raw)["at"] // 86400) == today
+               for raw in store.list_domain("agent_reservation"))
+    if store.job_counts()["submitted_today"] + used >= settings.ghost_max_jobs_per_day:
+        raise HTTPException(429, "Daily execution budget exhausted")
+    store.put_domain("agent_reservation", trial_id, json.dumps({
+        "organization_id": organization_id, "at": time.time()}))
+
+
 hunt_service.admission = submission_allowed
 
 
@@ -461,6 +478,13 @@ async def capabilities():
                     and settings.ghost_provider_spending_controls_confirmed
                     and settings.ghost_platform_budget_cents >= settings.ghost_cpu_model_review_reservation_cents),
                 "cpu_model_review_model": settings.nebius_super_model if settings.ghost_cpu_model_review_enabled else None,
+                "agent_verification_enabled": True,
+                "agent_supported_targets": list(TARGETS),
+                "agent_model_review_enabled": settings.ghost_agent_model_review_enabled,
+                "agent_model_review_ready": bool(settings.ghost_agent_model_review_enabled
+                    and settings.nebius_api_key and settings.ghost_live_execution_enabled
+                    and settings.ghost_provider_spending_controls_confirmed
+                    and settings.ghost_platform_budget_cents >= settings.ghost_cpu_model_review_reservation_cents),
                 "live_execution_enabled": True, "admission_controls_configured": True,
                 "execution_verified_by_this_check": False,
                 "configured_checkpoint_digest": cpu_controller(settings.ghost_policy_name).digest,
@@ -488,6 +512,13 @@ async def capabilities():
     )
     return {
         "mode": settings.ghost_mode,
+        "agent_verification_enabled": True,
+        "agent_supported_targets": list(TARGETS),
+        "agent_model_review_enabled": settings.ghost_agent_model_review_enabled,
+        "agent_model_review_ready": bool(settings.ghost_agent_model_review_enabled
+            and settings.nebius_api_key and settings.ghost_live_execution_enabled
+            and settings.ghost_provider_spending_controls_confirmed
+            and settings.ghost_platform_budget_cents >= settings.ghost_cpu_model_review_reservation_cents),
         "video_generation_enabled": settings.ghost_scenario_provider == "cosmos",
         "robot_execution_enabled": settings.ghost_simulator_provider == "isaac_http",
         "judge_provider": settings.ghost_judge_provider,
@@ -526,11 +557,15 @@ async def create_scenario(request: ScenarioCreate, http_request: Request):
 
 
 class HuntCreate(BaseModel):
-    objective: HuntObjective
+    domain: Literal["physical_ai", "ai_agent"] = "physical_ai"
+    objective: HuntObjective | AgentHuntObjective
     max_trials: int = Field(default=12, ge=3, le=50)
     strategy: Literal["adaptive", "random", "grid"] = "adaptive"
-    search_space: SearchSpace | None = None
+    search_space: SearchSpace | AgentSearchSpace | None = None
     policy_id: str | None = None
+    target_id: str | None = None
+    agent_policy: AgentPolicy | None = None
+    max_wall_seconds: int = Field(default=60, ge=3, le=300)
 
 
 @app.get("/hunts")
@@ -545,8 +580,17 @@ async def create_hunt(body: HuntCreate, request: Request):
     async with submission_lock:
         submission_allowed()
         try:
-            hunt = hunt_service.create(principal.organization_id, body.objective, body.max_trials,
-                                       body.strategy, body.search_space, body.policy_id)
+            if body.domain == "ai_agent":
+                if not isinstance(body.objective, AgentHuntObjective) or (body.search_space is not None and not isinstance(body.search_space, AgentSearchSpace)):
+                    raise ValueError("Agent Hunts require an agent objective and bounded agent search space")
+                hunt = hunt_service.create_agent(principal.organization_id, body.target_id or "reference-vulnerable-v1",
+                                                 body.objective, body.max_trials, body.strategy, body.agent_policy,
+                                                 body.search_space, body.max_wall_seconds)
+            else:
+                if not isinstance(body.objective, HuntObjective) or (body.search_space is not None and not isinstance(body.search_space, SearchSpace)):
+                    raise ValueError("Physical Hunts require a supported physical task and search space")
+                hunt = hunt_service.create(principal.organization_id, body.objective, body.max_trials,
+                                           body.strategy, body.search_space, body.policy_id)
         except ExecutionBlocked as exc:
             raise HTTPException(503, str(exc)) from exc
         except ValueError as exc:
@@ -574,15 +618,16 @@ async def resume_hunt(hunt_id: str, request: Request):
     hunt = owned_hunt(request, hunt_id)
     if hunt.status not in {HuntStatus.INTERRUPTED, HuntStatus.BLOCKED}:
         raise HTTPException(409, "Only interrupted or blocked Hunts can be resumed")
-    configured_digest = ("synthetic-development-fixture" if settings.ghost_simulator_provider == "local"
+    configured_digest = (hunt.target.version if isinstance(hunt, AgentHunt) else
+                         "synthetic-development-fixture" if settings.ghost_simulator_provider == "local"
                          else hunt.policy.checkpoint_digest if settings.ghost_simulator_provider == "mujoco_cpu"
                          else settings.gr00t_checkpoint_digest or "unconfigured")
-    if hunt.policy.checkpoint_digest != configured_digest:
+    if (hunt.target.version if isinstance(hunt, AgentHunt) else hunt.policy.checkpoint_digest) != configured_digest:
         raise HTTPException(409, "Worker checkpoint changed; create a new Hunt or replay a Ghost Case")
     async with submission_lock:
         submission_allowed()
         # Explicit resume does not overwrite an in-flight paid trial.
-        if hunt.candidates and hunt.candidates[-1].trial_id:
+        if not isinstance(hunt, AgentHunt) and hunt.candidates and hunt.candidates[-1].trial_id:
             job = store.job(hunt.candidates[-1].trial_id)
             if job and job["state"] in {"queued", "running"}:
                 raise HTTPException(409, "A Hunt trial is still queued or running; inspect it first")
@@ -599,7 +644,8 @@ async def list_ghost_cases(request: Request):
 
 @app.get("/failure-families")
 async def list_failure_families(request: Request):
-    return failure_families(hunt_service.cases(current_principal(request).organization_id))
+    return failure_families([case for case in hunt_service.cases(current_principal(request).organization_id)
+                             if not isinstance(case, AgentGhostCase)])
 
 
 def owned_case(request: Request, case_id: str):
@@ -614,14 +660,95 @@ async def get_ghost_case(case_id: str, request: Request):
     return owned_case(request, case_id)
 
 
+@app.get("/agent-targets")
+async def list_agent_targets(request: Request):
+    current_principal(request)
+    return [{"target_id": name, "version": version, "kind": "bundled_reference"}
+            for name, version in TARGETS.items()]
+
+
+def owned_agent_trial(request: Request, trial_id: str) -> AgentTrial:
+    trial = hunt_service.agent_trial(trial_id)
+    if not trial or trial.organization_id != current_principal(request).organization_id:
+        raise HTTPException(404, "Agent trial not found")
+    return trial
+
+
+@app.get("/agent-trials/{trial_id}")
+async def get_agent_trial(trial_id: str, request: Request):
+    trial = owned_agent_trial(request, trial_id)
+    return {**trial.model_dump(mode="json"), "evidence_verified": verify_trial(trial)}
+
+
+@app.get("/agent-trials/{trial_id}/model-review")
+async def get_agent_model_review(trial_id: str, request: Request):
+    trial = owned_agent_trial(request, trial_id)
+    raw = store.get_domain("agent_review", trial_id)
+    return json.loads(raw) if raw else {"status": "not_requested", "trial_id": trial.trial_id}
+
+
+@app.post("/agent-trials/{trial_id}/model-review")
+async def review_agent_trial(trial_id: str, request: Request):
+    access.require(request, ("admin", "operator"))
+    trial = owned_agent_trial(request, trial_id)
+    result = await agent_reviewer.review(trial)
+    access.accounts.audit(current_principal(request), "agent_model_review_requested", trial_id)
+    return result
+
+
+@app.post("/agent-trials/{trial_id}/replay")
+async def replay_agent_trial(trial_id: str, request: Request):
+    access.require(request, ("admin", "operator"))
+    original = owned_agent_trial(request, trial_id)
+    if not verify_trial(original):
+        raise HTTPException(409, "Saved agent evidence failed integrity verification")
+    if TARGETS.get(original.target.target_id) != original.target.version:
+        raise HTTPException(409, "The saved reference target version is no longer executable")
+    replay_id = f"atrial_{uuid.uuid4().hex[:12]}"
+    async with submission_lock:
+        reserve_agent_execution(replay_id, original.organization_id)
+    async with hunt_service.agent_slots:
+        replay = await asyncio.to_thread(execute_reference, original.target, original.policy, original.scenario,
+                                         hunt_id=original.hunt_id, trial_id=replay_id, objective=original.objective)
+    store.put_domain("agent_trial", replay_id, replay.model_dump_json())
+    access.accounts.audit(current_principal(request), "agent_trial_replayed", replay_id)
+    return {"trial": replay, "evidence_verified": verify_trial(replay),
+            "same_verdict": replay.status == original.status,
+            "exact_trace_match": (replay.tool_events == original.tool_events and replay.output == original.output
+                                  and replay.final_state == original.final_state and replay.assertions == original.assertions),
+            "replay_kind": "deterministic_bundled_reference"}
+
+
 class RegressionCreate(BaseModel):
     policy_id: str | None = None
+    target_id: str | None = None
 
 
 @app.post("/ghost-cases/{case_id}/regressions", status_code=202)
 async def run_case_regression(case_id: str, request: Request, body: RegressionCreate | None = None):
     access.require(request, ("admin", "operator"))
     case = owned_case(request, case_id)
+    if isinstance(case, AgentGhostCase):
+        if case.evidence_verification.get("status") != "verified":
+            raise HTTPException(409, "Baseline agent evidence failed integrity verification")
+        target_id = (body.target_id or body.policy_id) if body else None
+        if target_id not in TARGETS or target_id == case.target.target_id:
+            raise HTTPException(422, "Choose a different supported reference-agent version")
+        from .agent_verification import AgentTarget
+        target = AgentTarget(target_id=target_id, organization_id=case.organization_id,
+                             name=target_id, version=TARGETS[target_id])
+        principal = current_principal(request)
+        trial_id = f"atrial_{uuid.uuid4().hex[:12]}"
+        async with submission_lock:
+            reserve_agent_execution(trial_id, principal.organization_id)
+        async with hunt_service.agent_slots:
+            trial = await asyncio.to_thread(execute_reference, target, case.policy, case.scenario,
+                                            hunt_id=case.hunt_id, trial_id=trial_id, objective=case.objective)
+        store.put_domain("agent_trial", trial_id, trial.model_dump_json())
+        store.put_domain("regression", trial_id, json.dumps({"organization_id": principal.organization_id,
+                          "case_id": case_id, "trial_id": trial_id, "domain": "ai_agent"}))
+        access.accounts.audit(principal, "agent_case_regression", trial_id)
+        return agent_regression_view(case, trial)
     cpu = settings.ghost_simulator_provider == "mujoco_cpu"
     if cpu:
         try:
@@ -662,10 +789,31 @@ def regression_view(case, candidate):
                                    store.scenarios[baseline.scenario_id], store.scenarios[candidate.scenario_id])
 
 
+def agent_regression_view(case: AgentGhostCase, candidate: AgentTrial):
+    baseline = hunt_service.agent_trial(case.baseline_trial_id)
+    compatible = (baseline and verify_trial(baseline) and verify_trial(candidate)
+                  and case.evidence_verification.get("status") == "verified"
+                  and baseline.target.organization_id == candidate.target.organization_id == case.organization_id
+                  and candidate.scenario == case.scenario and candidate.policy == case.policy
+                  and candidate.adapter_version == case.adapter_version)
+    outcome = ("incompatible_or_unverified" if not compatible else
+               "fixed_on_case" if candidate.status == AgentVerdict.VERIFIED_SUCCESS else
+               "still_failing" if candidate.status == AgentVerdict.VERIFIED_FAILURE else
+               "inconclusive")
+    return {"case_id": case.case_id, "candidate_trial_id": candidate.trial_id, "outcome": outcome,
+            "baseline_target": case.target.target_id, "candidate_target": candidate.target.target_id,
+            "scope": "This saved mock-tool scenario and deterministic oracle only; not general agent safety."}
+
+
 @app.get("/ghost-cases/{case_id}/regressions")
 async def list_case_regressions(case_id: str, request: Request):
     case = owned_case(request, case_id)
     rows = [json.loads(raw) for raw in store.list_domain("regression")]
+    if isinstance(case, AgentGhostCase):
+        return [agent_regression_view(case, trial) for row in rows
+                if row.get("domain") == "ai_agent" and row.get("case_id") == case_id
+                and row.get("organization_id") == case.organization_id
+                if (trial := hunt_service.agent_trial(row.get("trial_id", "")))]
     return [regression_view(case, store.trials[row["trial_id"]]) for row in rows
             if row.get("case_id") == case_id and row.get("organization_id") == case.organization_id
             and row.get("trial_id") in store.trials]
@@ -677,6 +825,11 @@ async def get_case_regression(case_id: str, trial_id: str, request: Request):
     raw = store.get_domain("regression", trial_id)
     if not raw or json.loads(raw).get("case_id") != case_id or json.loads(raw).get("organization_id") != case.organization_id:
         raise HTTPException(404, "Regression not found")
+    if isinstance(case, AgentGhostCase):
+        trial = hunt_service.agent_trial(trial_id)
+        if not trial or trial.organization_id != case.organization_id:
+            raise HTTPException(404, "Regression not found")
+        return agent_regression_view(case, trial)
     candidate = owned_trial(request, trial_id)
     return regression_view(case, candidate)
 
@@ -924,3 +1077,8 @@ async def dashboard(request: Request):
 @app.get("/docs", response_class=HTMLResponse)
 async def documentation():
     return (ROOT / "static" / "docs.html").read_text()
+
+
+@app.get("/docs/agent", response_class=HTMLResponse)
+async def agent_documentation():
+    return (ROOT / "static" / "agent-guide.html").read_text()
