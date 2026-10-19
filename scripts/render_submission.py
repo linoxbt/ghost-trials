@@ -78,6 +78,7 @@ def render(source: Path, output: Path) -> None:
 | Robot simulation | Real headless MuJoCo gantry-arm manipulation on CPU |
 | Autonomous search | Bounded adaptive trials, reproduction, mutation, empirical boundary and regression |
 | Evidence | Telemetry, recipe, seed, controller digest, simulator version and independently recomputed trace metrics |
+| Local agent domain | Bundled executable reference agent, mock tools, versioned assertions, verified failure replay and case-specific regression; not deployed or open to arbitrary code |
 | NVIDIA / Nebius | One completed live Nemotron 3 Super review of a verified MuJoCo trial through Token Factory |
 | Not demonstrated | Physical robot, G1/SONIC/GR00T worker, live Cosmos generation, Nebius AI Cloud GPU or safety certification |
 
@@ -94,9 +95,9 @@ def render(source: Path, output: Path) -> None:
     <title>Ghost Trials — Devpost submission dossier</title><style>{CSS}</style></head><body>
     <section class="cover"><div class="brand">GHOST TRIALS</div><div class="cover-rule"></div>
     <h1>Evidence before<br>confidence.</h1>
-    <h2>Autonomous failure discovery for executable physical-AI controllers</h2>
+    <h2>Autonomous failure discovery for executable physical-AI controllers, with a controlled agent-verification extension</h2>
     <div class="meta">Nebius x NVIDIA Global AI Hackathon · Physical AI Track<br>
-    Prepared 18 October 2026<br><div class="disclaimer">Experimental evaluation platform — not a safety certification.</div></div>
+    Updated 20 October 2026<br><div class="disclaimer">Experimental evaluation platform — not a safety certification. Agent domain is local, not yet deployed.</div></div>
     </section><main>{body}</main></body></html>"""
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
