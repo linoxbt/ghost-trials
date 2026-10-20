@@ -222,6 +222,20 @@ class Accounts:
             user["organizations"] = [dict(row) for row in db.execute("SELECT o.id,o.name,m.role FROM organizations o JOIN members m ON o.id=m.organization_id WHERE m.subject=?", (principal.subject,))]
             return user
 
+    def update_display_name(self, principal, display_name):
+        if principal.kind not in {"privy", "dynamic"}:
+            raise HTTPException(401, "Individual sign-in required")
+        name = display_name.strip()
+        if not 2 <= len(name) <= 80 or any(ord(char) < 32 or ord(char) == 127 for char in name):
+            raise HTTPException(422, "Display name must be 2–80 characters on one line")
+        with self.store.connect() as db:
+            self.schema(db)
+            if not db.execute("UPDATE users SET display_name=? WHERE subject=? AND disabled=0",
+                              (name, principal.subject)).rowcount:
+                raise HTTPException(404, "Account not found")
+        self.audit(principal, "profile_updated")
+        return self.profile(principal)
+
     def switch(self, raw, org_id):
         principal = self.resolve(raw)
         if not principal:

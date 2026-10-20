@@ -38,13 +38,13 @@ function SignIn({methods,passkeySignupEnabled}){
       const invite=location.pathname==='/auth/invite'?location.hash.slice(1):'';
       if(invite){const result=await api('/organizations/invitations/accept',{token:invite});
         await api('/organizations/switch',{organization_id:result.organization_id});}
-      location.replace('/app/');
+      location.replace(new URLSearchParams(location.search).get('manage')==='passkey'?'/app/#/account':'/app/');
     }catch(err){setError(err.message);setBusy(false);}
   }
   const emailEnabled=methods.includes('email');
   const googleEnabled=methods.includes('google');
-  return <><p className="login-lead">Continue to your private evaluation workspace.</p>
-    {authenticated?<><button className="auth-primary" disabled={busy||!ready} onClick={enter}>{busy?'Opening your workspace…':'Continue to workspace →'}</button>
+  return <>
+    {authenticated?<><button className="auth-primary" disabled={busy||!ready} onClick={enter}>{busy?'Opening workspace…':'Open workspace →'}</button>
       {passkeyEnabled&&<button className="auth-secondary" disabled={!ready||busy} onClick={()=>void beginPasskey(()=>linkPasskey({name:'Ghost Trials'}))}>Create a passkey for this account</button>}
       <button className="auth-text-button" disabled={busy} onClick={()=>logout()}>Use a different account</button></>:
       <div className="auth-methods">
@@ -57,7 +57,7 @@ function SignIn({methods,passkeySignupEnabled}){
     {passkeyNotice&&<p className="auth-success" role="status">{passkeyNotice}</p>}
     {error&&<p className="auth-error" role="alert">{error}</p>}
     {!ready&&<p role="status">Connecting to secure sign-in…</p>}
-    <p className="auth-note">{location.pathname==='/auth/invite'?'Continue to accept your team invitation.':'New to Ghost Trials? Continue with an available method to create your account.'}</p></>;
+    {location.pathname==='/auth/invite'&&<p className="auth-note">Sign in to accept your invitation.</p>}</>;
 }
 async function start(){
   const root=createRoot(document.getElementById('privy-login'));

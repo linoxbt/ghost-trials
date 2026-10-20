@@ -184,7 +184,7 @@ async def test_read_only_evaluation_endpoints(scenario, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/trials/trl_a/evidence")).json()["origin"] == "simulator"
         assert (await client.get("/trials/missing/evidence")).status_code == 404
-        assert (await client.get("/comparisons?baseline=trl_a&candidate=trl_b")).json()["comparable"]
+        assert (await client.get("/comparisons?baseline=trl_a&candidate=trl_b")).json()["comparable"] is False
         assert (await client.get("/comparisons?baseline=trl_a&candidate=missing")).status_code == 404
         assert len((await client.get("/benchmarks")).json()["groups"]) == 2
         summary = (await client.get("/safety-score")).json()
@@ -222,3 +222,19 @@ async def test_replay_endpoint_preserves_recipe_and_reports_bad_requests(scenari
         assert store.trials[replay_id].replay_of == "trl_a"
         assert store.trials[replay_id].scenario_id == scenario.scenario_id
         assert len(store.scenarios) == 1
+
+
+@pytest.mark.asyncio
+async def test_gpu_exact_replay_rejects_changed_checkpoint(scenario, monkeypatch, tmp_path):
+    from ghost_trials.app import app, settings, store
+    original = recorded_trial()
+    original.status = TrialStatus.DONE
+    monkeypatch.setattr(store, "path", tmp_path / "replay-checkpoint.sqlite3")
+    monkeypatch.setattr(store, "trials", {original.trial_id: original})
+    monkeypatch.setattr(store, "scenarios", {scenario.scenario_id: scenario})
+    monkeypatch.setattr(settings, "ghost_simulator_provider", "isaac_http")
+    monkeypatch.setattr(settings, "gr00t_checkpoint_digest", "different-checkpoint")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/trials/{original.trial_id}/replay")
+    assert response.status_code == 409
+    assert "checkpoint differs" in response.json()["detail"]

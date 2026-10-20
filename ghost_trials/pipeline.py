@@ -63,7 +63,7 @@ class CertificationPipeline:
         if original.execution_mode == "physical":
             raise ValueError("A physical replay requires a new on-site recording; this server cannot actuate a robot")
         if original.status not in {TrialStatus.DONE, TrialStatus.BLOCKED}:
-            raise ValueError("Only a completed or blocked trial can be replayed")
+            raise ValueError("Only a completed or blocked trial can be retried")
         scenario = self.store.scenarios[original.scenario_id]
         if scenario.structured_description.hazard_type == "pending_generation":
             raise ValueError("Scenario generation must finish before reusing a scenario")

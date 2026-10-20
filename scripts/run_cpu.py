@@ -16,6 +16,13 @@ def main() -> None:
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         if os.environ.get("GHOST_PUBLIC_DEPLOYMENT", "").lower() != "true":
             raise SystemExit("Non-loopback CPU server requires GHOST_PUBLIC_DEPLOYMENT=true and configured individual sign-in")
+    else:
+        from ghost_trials.config import Settings
+        configured = Settings()
+        if not (configured.ghost_public_deployment or configured.ghost_customer_auth_required
+                or configured.privy_app_id or configured.dynamic_environment_id
+                or configured.ghost_admin_token):
+            os.environ.setdefault("GHOST_UNAUTHENTICATED_LOCAL_DEV", "true")
     import uvicorn
     uvicorn.run("ghost_trials.app:app", host=args.host, port=args.port)
 

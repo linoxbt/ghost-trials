@@ -12,6 +12,8 @@ from ghost_trials.hunt import default_space
 from ghost_trials.hunt_runtime import HuntService
 from ghost_trials.durable import DurableStore
 from ghost_trials.config import Settings
+from ghost_trials.retained_evidence import reporting_trial
+from ghost_trials.evaluation import evidence_class, score_exclusion_reasons
 
 
 def test_cpu_physics_loads_robot_and_measures_success_and_failure():
@@ -60,6 +62,7 @@ def test_cpu_full_api_hunt_replay_regression_and_evidence(tmp_path):
     assert report["failures_discovered"] >= 1
     assert report["evidence_verification"] == "cpu_trace_metrics_verified"
     assert report["replay_status"] == "done"
+    assert report["reproduction_status"] == "reproducible"
     assert report["baseline_final_x_m"] == report["replay_final_x_m"]
     assert report["regression_outcome"] in {"fixed_on_case", "still_failing"}
     bundle = tmp_path / "artifacts" / "trials" / report["artifact_directory"].split("/")[-1]
@@ -67,12 +70,19 @@ def test_cpu_full_api_hunt_replay_regression_and_evidence(tmp_path):
     assert verify_cpu_bundle(bundle, summary["policy_digest"])["status"] == "cpu_trace_metrics_verified"
     retained = DurableStore(tmp_path / "state.sqlite3")
     asyncio.run(retained.load())
+    baseline = retained.trials[report["artifact_directory"].split("/")[-1]]
+    scenario = retained.scenarios[baseline.scenario_id]
+    assert evidence_class(reporting_trial(baseline, scenario, tmp_path / "artifacts")) == "artifact_validated_simulation"
     service = HuntService(retained, None, Settings(_env_file=None, ghost_artifact_root=tmp_path / "artifacts"), None, None)
     assert service.case(report["case_id"]).evidence_verification["status"] == "cpu_trace_metrics_verified"
     trace = bundle / "telemetry.jsonl"
     trace.write_text(trace.read_text().replace("object_position_m", "faked_position_m", 1))
     with pytest.raises(ValueError, match="hash mismatch"):
         verify_cpu_bundle(bundle, summary["policy_digest"])
+    checked = reporting_trial(baseline, scenario, tmp_path / "artifacts")
+    assert checked.evidence_verification["status"] == "invalid_retained_evidence"
+    assert "unverified" in score_exclusion_reasons(checked)
+    assert baseline.evidence_verification["status"] == "cpu_trace_metrics_verified"
     assert service.case(report["case_id"]).evidence_verification["status"] == "invalid_retained_evidence"
     from ghost_trials.app import regression_view
     assert regression_view(service.case(report["case_id"]), retained.trials[report["candidate_trial_id"]])[

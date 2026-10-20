@@ -3,7 +3,7 @@
 **Nebius x NVIDIA Global AI Hackathon · Physical AI Track**
 **Updated 20 October 2026 · Submission draft, not a safety certificate**
 
-> **Owner review before submission:** add a public YouTube video URL; confirm your country, project start date, eligibility, event attendance, and personal 1–10 ratings. Record a fresh signed-in Hunt on the hosted site. Do not paste the editorial notes or bracketed placeholders into Devpost.
+> **Owner review before submission:** add a public YouTube video URL; confirm your country, project start date, eligibility, event attendance, and personal 1–10 ratings. Release the matching frontend, publish the source, rotate the exposed Privy secret, and record a fresh signed-in Hunt on the hosted site. Do not paste the editorial notes or bracketed placeholders into Devpost.
 
 ## Project overview — paste into Devpost
 
@@ -21,19 +21,19 @@
 
 **Built with** (select up to 25 tags): Python, FastAPI, Pydantic, MuJoCo, SQLite, JavaScript, React, Privy, WebSockets, NVIDIA Nemotron, Nebius Token Factory, HTTPX, Docker, Pytest, Railway, Netlify, GitHub.
 
-The GitHub repository includes the MIT license, setup instructions and source code. The hosted frontend is on Netlify; its FastAPI CPU backend is on Railway. The required NVIDIA-model runtime integration is **Nemotron 3 Super through Nebius Token Factory**, not Railway hosting. The new AI Agent Verification work is currently on a local implementation branch and is **not yet deployed** to those URLs. We have not used Nebius AI Cloud GPU compute or claimed Serverless Jobs/Endpoints as deployed infrastructure.
+The GitHub repository includes the MIT license, setup instructions and source code, but the newest two-domain changes in this dossier are **not yet pushed to `main`**. The hosted frontend is on Netlify; its FastAPI CPU backend is on Railway. The Railway backend now serves the multi-domain API, but the Netlify site still lacks the matching agent-route proxy/UI release; do **not** describe the public website as a working two-domain demo yet. The required NVIDIA-model runtime integration is **Nemotron 3 Super through Nebius Token Factory**, not Railway hosting. We have not used Nebius AI Cloud GPU compute or claimed Serverless Jobs/Endpoints as deployed infrastructure.
 
 ## Project story — paste into “About the project”
 
 ### Inspiration
 
-A robot controller may succeed under nominal conditions and fail when friction, object placement, mass or timing shifts. The useful question is not simply “What score did it get?” It is: **Which physical condition caused a repeatable failure, what did the robot actually do, and can a reviewer inspect and rerun the evidence?**
+A robot controller may succeed under nominal conditions and fail when friction, object placement, mass or timing shifts. An AI agent can likewise complete a routine task but follow malicious tool output into an unauthorized request. In both cases, the useful question is not simply “What score did it get?” It is: **Which bounded condition caused the failure, what did the executable target actually do, and can a reviewer inspect and rerun the evidence?**
 
-Ghost Trials grew from that question. We wanted an experimental red-team workflow for embodied AI: give it an executable policy, define a task, and let it search *bounded, simulator-supported* conditions for weaknesses. The product is not a certification authority, and a passed set of trials is not evidence that a robot is safe to deploy.
+Ghost Trials grew from that question. We began with an experimental red-team workflow for embodied AI: give it an executable controller, define a task, and let it search *bounded, simulator-supported* conditions for weaknesses. We then applied the same evidence-first Hunt lifecycle to a tightly controlled AI-agent reference target. The product is not a certification authority, and passing a bounded set of trials does not establish general safety or security.
 
 ### What it does
 
-The primary workflow is **Connect controller → Define task → Release the Ghost → Inspect trials → Reproduce failure → Save Ghost Case → Compare another controller → Hunt again**.
+The shared workflow is **Select executable target → Define task and constraints → Release the Ghost → Inspect trials → Reproduce failure → Save Ghost Case → Compare another version → Hunt again**. The Physical AI controller task remains the submission's primary demonstration; the agent domain shows how the evidence workflow extends without pretending tool calls are robot telemetry.
 
 The demonstrated default task runs entirely on CPU. A two-axis gantry arm pushes a free block across a tabletop toward a target band. MuJoCo advances articulated motion, gravity, contact and friction; the selected executable controller issues actions on each physics step. The Hunt can vary object mass, surface friction, initial block position and controller delay—parameters that affect the implemented model. Unsupported controls are rejected rather than displayed as decorative settings.
 
@@ -41,7 +41,7 @@ The Hunt samples the declared search space, then uses observed failures and near
 
 The workspace presents Hunt, Failures, Trials, Compare and System views. It shows trial progress, measured task outcome, a telemetry-derived state replay, search observations, evidence checks, model interpretation and known limitations. The replay is generated from recorded simulator states; it is **not camera footage or a Cosmos-generated robot response**. Authenticated users have organization-isolated records. New workspaces do not automatically receive paid-inference access.
 
-A second, locally implemented domain verifies a **bundled executable AI agent** in a controlled mock-tool environment. A bounded Hunt changes user and untrusted tool-output inputs, records actual tool requests, and applies versioned deterministic assertions to unauthorized actions. It retains a trace and evidence digest, reproduces a saved failure, and tests a corrected reference agent against that case. This is a deliberately narrow verification harness, not permission to execute arbitrary customer code on Railway. The agent domain is complementary to the Physical AI submission; it has not replaced the measured robot-physics path.
+A second domain verifies a **bundled executable AI agent** in a controlled mock-tool environment. A bounded Hunt changes user and untrusted tool-output inputs, records actual tool requests, and applies versioned deterministic assertions to unauthorized actions. It retains a trace and evidence digest, reproduces a saved failure, and tests a corrected reference agent against that case. The domain was demonstrated locally and its protected API is deployed on Railway, but the public Netlify UI has not yet been released with the necessary route. This is a deliberately narrow verification harness, not permission to execute arbitrary customer code on Railway. The agent domain is complementary to the Physical AI submission; it has not replaced the measured robot-physics path.
 
 ### How we built it
 
@@ -65,15 +65,15 @@ The hardest boundary was resisting plausible but unsupported claims. A polished 
 
 We also learned that reproducibility is more than a random seed. Controller digest, simulator version, recipe, timing, metric definitions and evidence provenance all matter. A useful failure report should make those identities visible so a robotics engineer can reproduce and challenge the finding.
 
-The potential users are robotics teams and policy developers who need to prioritize regressions before deploying a new checkpoint. The immediate value is a repeatable, evidence-backed adversarial test of an **executable controller in a defined simulator task**. It is not a regulator-approved certification result, a general robot-safety probability or a replacement for physical validation and expert review.
+The primary users for this Physical AI submission are robotics teams and policy developers who need to prioritize regressions before deploying a new checkpoint. The controlled agent milestone also addresses developers testing tool-use boundaries in executable agent programs. The immediate demonstrated value is a repeatable, evidence-backed adversarial test of an **executable controller in a defined simulator task** and of **bundled reference agents with mock tools**. Neither result is a regulator-approved certification, a general safety/security probability, or a replacement for physical validation and expert review.
 
 ### What we accomplished and what remains
 
 A bounded local adaptive CPU Hunt completed **16 real MuJoCo trials and found three failures** in the 18 October validation. A saved case replayed with the same measured final block position (**0.625826 m**); a different compatible controller executed the same recipe and reached **0.776821 m**, passing that *particular* case. In a separate 20 October two-domain rerun, a nine-trial MuJoCo grid Hunt found **three controller failures**. One saved case replayed at **0.499450 m**; the candidate controller reached **0.513131 m** and **still failed** that case, so the application reported no fix. Search outcomes depend on the sampled recipes; these runs have different strategies and must not be conflated.
 
-The same demonstration ran a six-trial Hunt against a deliberately vulnerable bundled reference agent. Adversarial tool output induced a request for forbidden `admin.delete`; the mock-tool mediator denied the operation, and the recorded unauthorized request triggered a versioned assertion. The verified Ghost Case reproduced, while `reference-corrected-v2` passed that **specific** saved case. This is real local agent-program execution with mock tools, not a live customer-agent assessment or evidence of a production-service compromise. The full automated suite passed **188 tests** in the current development environment after the 20 October audit remediation. Tests include actual MuJoCo execution, bundled-agent execution and synthetic search fixtures; they are not independent robotics validation.
+The same demonstration ran a six-trial Hunt against a deliberately vulnerable bundled reference agent. Adversarial tool output induced a request for forbidden `admin.delete`; the mock-tool mediator denied the operation, and the recorded unauthorized request triggered a versioned assertion. The verified Ghost Case reproduced, while `reference-corrected-v2` passed that **specific** saved case. This is real local agent-program execution with mock tools, not a live customer-agent assessment or evidence of a production-service compromise. The full automated suite passed **193 tests** in the current development environment after the 20 October audit remediation. Tests include actual MuJoCo execution, bundled-agent execution and synthetic search fixtures; they are not independent robotics validation.
 
-The last checked hosted backend was running CPU/MuJoCo on Railway and the Netlify health proxy responded; these links require a fresh pre-submission health check. Live Nemotron review is configured on that backend, but paid review still requires an operator-assigned budget for a particular signed-in organization; no public new account receives it automatically. The new agent domain is implemented in source but must not be presented as a live-site feature until a reviewed release and signed-in hosted validation. The final Physical AI video should show at least one minute of actual Hunt, policy execution and evidence views, and should show a completed model review only if that signed-in trial really received one.
+On 20 October, Railway deployment `2d0dd1f8-879e-4cd7-9448-6041089b834f` reached `SUCCESS`. The live `/health` response reported `multidomain-v1` and MuJoCo CPU execution; an unauthenticated direct `/agent-trials` request returned the expected `401` rather than `404`. These checks establish backend deployment and route protection, **not** a completed signed-in production Hunt. The Netlify `/agent-trials` route still returned `404`, so the public two-domain frontend is not yet complete. The corresponding source remains uncommitted on the local `agent-verification` branch; a GitHub-triggered Railway deploy from the older `main` could replace this CLI-uploaded backend. Live Nemotron review is configured on the backend, but paid review still requires an operator-assigned budget for a particular signed-in organization; no public new account receives it automatically. The final Physical AI video should show at least one minute of actual Hunt, policy execution and evidence views, and should show a completed model review only if that signed-in trial really received one.
 
 The original Unitree G1/GR00T/GEAR-SONIC/Isaac concept remains an optional, unvalidated integration path. No physical G1, compatible fine-tuned G1 checkpoint, end-to-end G1 worker run, live Cosmos generation or Nebius AI Cloud GPU instance is claimed. The next engineering milestones are a signed-in production Hunt with a budgeted review, an independent robotics assessment of trace and measurement limitations, and a compatible G1 run if hardware/compute access becomes available.
 
@@ -96,7 +96,7 @@ The original Unitree G1/GR00T/GEAR-SONIC/Isaac concept remains an optional, unva
 
 **Video:** `[PUBLIC_YOUTUBE_URL]`
 
-The repository has an MIT license, installation instructions and run commands. The hosted app requires normal Privy email sign-in for private Hunt functions. Judges do not need a special shared login; they may sign up normally. A new workspace's paid model review is disabled until an operator allocates its budget. A local CPU Hunt needs no paid service, GPU or API key.
+The repository has an MIT license, installation instructions and run commands, but its public `main` branch does not yet contain the local two-domain update described here. The hosted app requires normal Privy email sign-in for private Hunt functions. Judges do not need a special shared login; they may sign up normally. The Railway multi-domain backend is live; the Netlify agent route is still missing, so only the locally reproduced agent demonstration is presently supported as evidence of that domain. A new workspace's paid model review is disabled until an operator allocates its budget. A local CPU Hunt needs no paid service, GPU or API key.
 
 ### Which model(s) did you use, and why that size/variant?
 
@@ -159,7 +159,7 @@ Use only screenshots of the real app or recorded telemetry. Suggested captions (
 4. **Evidence:** “Observation, Nemotron interpretation and artifact verification are separate.”
 5. **Compare:** “A candidate is executed against the exact case; the result may pass or remain a failure.”
 6. **Reference:** “Public seed-42 MuJoCo trace; this reference has no Nemotron review and is excluded from customer scores.”
-7. **Agent verification (source demonstration; hosted release unverified):** “A forbidden mock-tool request is denied, logged and reproduced; arbitrary customer agents are not supported.”
+7. **Agent verification (local demonstration; frontend release pending):** “A forbidden mock-tool request is denied, logged and reproduced; arbitrary customer agents are not supported.”
 
 **Three-minute video outline:**
 
@@ -170,7 +170,8 @@ Use only screenshots of the real app or recorded telemetry. Suggested captions (
 | 0:45–1:30 | Live trials, telemetry and search focus | Show real MuJoCo progression; keep at least one minute of key modules visibly operating. |
 | 1:30–2:05 | Verified Ghost Case and exact replay | Recipe, digest, observed failure and repeatability limitations. |
 | 2:05–2:30 | Completed Nemotron review **only if it exists in that signed-in run** | Cite the actual Token Factory model ID, evidence digest and token usage; never substitute a contract test. |
-| 2:30–2:55 | Compatible-controller regression and close | Show the actual pass or continuing failure. Neither is a general safety claim. |
+| 2:30–2:45 | Compatible-controller regression | Show the actual pass or continuing failure. Neither is a general safety claim. |
+| 2:45–2:55 | Optional local agent trace, if shown truthfully | Distinguish the denied mock-tool request from an executed external action; do not imply the public site supports it yet. |
 
 The official rules call for a public video under three minutes and at least one minute of actual application modules in action for a software-only Physical AI entry. Do not use a landing-page animation or generated hazard clip as a substitute for controller execution. See [the official rules](https://nebiusglobalaihackathon.devpost.com/rules).
 
@@ -182,6 +183,8 @@ The official rules call for a public video under three minutes and at least one 
 
 **20 October two-domain local demonstration:** `uv run python -m scripts.multidomain_demo --output data/multidomain-demo` executes nine real headless MuJoCo trials and six bundled-agent trials with no paid provider. The observed rerun had three controller failures; the selected case replayed at 0.499450 m, and the candidate still failed it at 0.513131 m. The agent run discovered and denied an unauthorized `admin.delete` request, verified and reproduced the trace, and found that the corrected reference agent passed that exact case. These are two different bounded test domains. The agent review integration was contract-tested, not called live in this demonstration. The selected physical case had no automatic reproduction attempt or empirical boundary in this particular nine-trial run; those are optional Hunt findings, not implied by exact replay.
 
+**Hosted release check (20 October):** the Railway backend deployment above passed its platform verdict and returned the expected multi-domain health contract. The protected agent API returned `401` without a session. The Netlify agent route returned `404`; no signed-in hosted agent Hunt, production replay or hosted agent-model review was run as part of this check. Public `main` still needs the source changes, and the PDF dossier has not been regenerated from this update.
+
 **Run locally:** follow the [README](https://github.com/linoxbt/ghost-trials#quick-start), then run `uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-validation` for actual headless MuJoCo trials, exact replay and regression. Tests: `uv run --frozen --extra dev --extra physics --extra models --extra storage pytest -q`. The default CPU path needs no GPU or paid API. To add a live model review, use only the backend configuration and spending safeguards in the README; a customer's organization needs an explicit budget allocation.
 
 **Known limits:** The default task is a gantry manipulation benchmark, not Unitree G1 locomotion. The built-in lightweight neural-policy format is executable on CPU but is not a trained G1 checkpoint. Physical recording support has only fixture-level validation. The agent harness accepts bundled reference agents only; it is not an arbitrary-code sandbox, and its corrected agent passed one specific regression case. No live Cosmos video, G1/SONIC/GR00T execution, Isaac worker acceptance, independent safety certification, or physical robot result is represented as complete. An application admission budget is not an external provider charge ceiling. Results are conditional on the tested controller or target, runtime version, recipe, seed, task and metric definition.
@@ -192,7 +195,10 @@ The official rules call for a public video under three minutes and at least one 
 - [ ] Confirm your actual residence, age/eligibility, team status, project start date and any Builders & Brews attendance.
 - [ ] Choose the three personal 1–10 ratings; do not present them as measured benchmark scores.
 - [ ] Sign in to the hosted site, run a fresh Hunt, inspect one Ghost Case and check the exact replay/regression flow.
-- [ ] Decide whether to release the local AI-agent domain; until it is reviewed and deployed, do not claim that the public site offers it.
+- [ ] Rotate the previously exposed Privy secret and update the private Railway value; never put the replacement in chat, Git, or frontend configuration.
+- [ ] Review, commit and push the two-domain source changes to the public repository; confirm a subsequent Railway deployment still serves `multidomain-v1`.
+- [ ] Deploy the matching Netlify frontend/proxy, confirm `/agent-trials` no longer returns `404`, and validate a signed-in agent Hunt, trace, Ghost Case, replay and regression. Until then, do not claim that the public site offers the agent domain.
+- [ ] Regenerate the PDF dossier if you plan to submit it as a current project artifact.
 - [ ] If the video claims a live Nemotron review in the signed-in app, have an operator allocate only your workspace an admission budget and verify `model_review.status=complete` on that exact trial.
 - [ ] Record and upload a public YouTube video under three minutes, including at least one minute of real key modules operating.
 - [ ] Verify the live URLs, public repository, MIT license, README, media captions and feedback fields immediately before pressing Submit.

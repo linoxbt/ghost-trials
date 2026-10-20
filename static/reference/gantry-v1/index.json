@@ -2,7 +2,7 @@
   "kind": "public_reference_cpu_simulation",
   "customer_score_eligible": false,
   "scope": "Project reference controller and MuJoCo tabletop only; not G1 or hardware",
-  "trial_id": "trl_45b832ac0b5c",
+  "trial_id": "trl_2b54cd472f1c",
   "policy_name": "gantry-push-v1",
   "checkpoint_digest": "sha256:79db89f680dfdac713f317635c7f5773f591c24977df6af5c0e9b8479b54a734",
   "simulator_version": "MuJoCo 3.14.0; ghost-gantry-xy-v1",

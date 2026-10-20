@@ -21,7 +21,8 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
     os.environ.update(GHOST_MODE="cpu", GHOST_SCENARIO_PROVIDER="cpu",
                       GHOST_SIMULATOR_PROVIDER="mujoco_cpu", GHOST_JUDGE_PROVIDER="cpu",
                       GHOST_POLICY_NAME="gantry-push-v1", GHOST_EXECUTION_BACKEND="mujoco_cpu",
-                      GHOST_CUSTOMER_AUTH_REQUIRED="false", GHOST_ADMIN_TOKEN="",
+                      GHOST_CUSTOMER_AUTH_REQUIRED="false", GHOST_UNAUTHENTICATED_LOCAL_DEV="true", GHOST_ADMIN_TOKEN="",
+                      GHOST_PUBLIC_DEPLOYMENT="false",
                       GHOST_OPERATOR_TOKEN="", GHOST_VIEWER_TOKEN="", PRIVY_APP_ID="",
                       GHOST_CPU_MODEL_REVIEW_ENABLED="false", GHOST_LIVE_EXECUTION_ENABLED="false",
                       GHOST_PROVIDER_SPENDING_CONTROLS_CONFIRMED="false", NEBIUS_API_KEY="",
@@ -62,20 +63,27 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
             bundle = root / "artifacts" / "trials" / case["baseline_trial_id"]
             verification = verify_cpu_bundle(bundle, case["policy"]["checkpoint_digest"])
             print(f"Evidence verified: {case['case_id']}", flush=True)
-            replay = await client.post(f"/trials/{case['baseline_trial_id']}/replay")
-            replay.raise_for_status()
-            replay_id = replay.json()["trial"]["trial_id"]
-            for _ in range(100):
-                repeated = (await client.get(f"/trials/{replay_id}")).json()
-                if repeated["status"] in {"done", "error", "blocked"}:
-                    break
-                await asyncio.sleep(.1)
-            if repeated["status"] != "done" or repeated["metrics"]["task_completed"]:
-                raise RuntimeError("Exact failure replay did not reproduce")
+            replay_ids = []
+            replay_positions = []
+            for _attempt in range(2):
+                replay = await client.post(f"/trials/{case['baseline_trial_id']}/replay")
+                replay.raise_for_status()
+                replay_id = replay.json()["trial"]["trial_id"]
+                for _ in range(100):
+                    repeated = (await client.get(f"/trials/{replay_id}")).json()
+                    if repeated["status"] in {"done", "error", "blocked"}:
+                        break
+                    await asyncio.sleep(.1)
+                if repeated["status"] != "done" or repeated["metrics"]["task_completed"]:
+                    raise RuntimeError("Exact failure replay did not reproduce")
+                replay_ids.append(replay_id)
+                replay_positions.append(repeated["metrics"]["robot_metrics"]["object_final_x_m"])
             case = (await client.get(f"/ghost-cases/{case['case_id']}")).json()
-            if replay_id not in case["reproduction"]["attempts"]:
-                raise RuntimeError("Completed physical replay was not retained on its Ghost Case")
-            print(f"Failure replayed: {replay_id}", flush=True)
+            if (not set(replay_ids) <= set(case["reproduction"]["attempts"])
+                    or case["reproduction"]["status"] != "reproducible"
+                    or len(set(replay_positions)) != 1):
+                raise RuntimeError("Repeated physical failure was not reproducible from saved evidence")
+            print(f"Failure reproduced twice: {', '.join(replay_ids)}", flush=True)
             regression = await client.post(f"/ghost-cases/{case['case_id']}/regressions",
                                            json={"policy_id": "gantry-push-v2"})
             regression.raise_for_status()
@@ -107,7 +115,7 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
                     "baseline_final_x_m": case["measured_metrics"]["robot_metrics"]["object_final_x_m"],
                     "baseline_policy_digest": case["policy"]["checkpoint_digest"],
                     "evidence_verification": verification["status"], "replay_status": repeated["status"],
-                    "replay_final_x_m": repeated["metrics"]["robot_metrics"]["object_final_x_m"],
+                    "replay_final_x_m": replay_positions[0],
                     "regression_outcome": result["outcome"], "candidate_trial_id": regression_id,
                     "candidate_final_x_m": candidate_trial["metrics"]["robot_metrics"]["object_final_x_m"],
                     "candidate_policy_digest": candidate_trial["metrics"]["policy_checkpoint_digest"],

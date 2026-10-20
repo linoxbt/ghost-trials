@@ -5,13 +5,19 @@
 Ghost Trials is an **experimental autonomous failure-discovery and verification platform**. It supports the existing Physical AI workflow and a controlled AI-agent reference domain. Give it an executable target and a task; it searches bounded conditions for failures, verifies recorded evidence, reproduces findings, and replays saved Ghost Cases against another version. It is not a safety-certification service. The default robotics path runs real headless MuJoCo physics on CPU. The agent path executes only bundled reference agents with in-memory mock tools; arbitrary customer code remains blocked. The original Unitree G1/SONIC/Isaac path remains optional and has not been demonstrated end to end in this deployment.
 
 For the implemented two-domain contract, trust boundaries, oracle methodology, replay limitations, and one-command CPU demonstration, see [AI Agent Verification](docs/AGENT_VERIFICATION.md).
-The latest code-level audit and unresolved release gates are in [Audit remediation status](docs/AUDIT_REMEDIATION.md).
+The [audit remediation record](docs/AUDIT_REMEDIATION.md) covers the code-level fixes and limits; its hosted-release snapshot predates the Railway deployment described below.
 
 The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. A separately gated NVIDIA Nemotron review through Nebius Token Factory can interpret every verified CPU trial; model failure never changes the measured outcome. NVIDIA/Nebius services are not dependencies of CPU physics. The legacy `local` adapter remains synthetic and is development-only.
 
+## Hosted release status (20 October 2026)
+
+The existing Railway production backend was updated from this local checkout. Deployment `2d0dd1f8-879e-4cd7-9448-6041089b834f` reached `SUCCESS`; [its live health response](https://ghost-trials-production.up.railway.app/health) reported `api_contract: multidomain-v1`, `execution_backend: mujoco_cpu`, and `simulator_provider: mujoco_cpu`. An unauthenticated request to the protected `/agent-trials` backend route returned `401`, confirming the route exists and remains access-controlled. This is a deployment/health check, **not** a signed-in end-to-end production Hunt or a new live Nemotron review.
+
+The Netlify frontend has **not** received the matching route and UI update: `https://ghost-trials.netlify.app/agent-trials` returned `404` at this snapshot. The pending frontend proxy change is in `scripts/build_netlify.py`. The current changes are also uncommitted on the local `agent-verification` branch, not published to GitHub `main`; a future GitHub-triggered Railway deployment could replace this CLI-uploaded backend. Treat the public site as a Physical AI preview until the frontend is released and a signed-in two-domain smoke test passes. The previously exposed Privy secret must be rotated in Privy and replaced in private backend configuration before claiming production readiness.
+
 ## Hackathon submission
 
-The [Devpost submission draft](submission.md) describes the local AI-agent milestone, but the [judge-facing PDF dossier](submission.pdf) predates it and must be refreshed before submission. Personal details, numeric ratings, project-history confirmation, the signed-in production demo and public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
+The [Devpost submission draft](submission.md) describes both demonstrated local domains and the current partial hosted release. The [PDF dossier](submission.pdf) has not yet been regenerated to match this update. Personal details, numeric ratings, project-history confirmation, a signed-in production demo and the public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
 
 ## Quick start
 
@@ -22,10 +28,11 @@ cp .env.example .env
 npm ci
 npm run build:auth
 uv sync --extra dev
-uv run uvicorn ghost_trials.app:app --reload
+uv run python -m scripts.run_cpu
 ```
 
 If you already have a private `.env` selecting the GPU/production providers, leave it intact and start the CPU mode explicitly with `uv run python -m scripts.run_cpu`.
+Direct `uvicorn` startup without authentication now fails closed. The loopback-only `scripts.run_cpu` command explicitly enables unauthenticated development mode when no identity provider or role token is configured. Never enable `GHOST_UNAUTHENTICATED_LOCAL_DEV` on a public server.
 
 Open <http://127.0.0.1:8000> for the landing page, `/docs` for documentation, or `/app/` for the Hunt workspace. Choose **CPU MuJoCo tabletop**, an executable gantry controller, and **Release the Ghost**. Completed CPU trials contain measured telemetry and a state-derived trajectory SVG, not a fabricated robot video. With the CPU defaults in `.env.example`, no GPU, CUDA, API key, or paid service is needed. An existing private `.env` may override those defaults; consult its provider settings before starting.
 
@@ -36,6 +43,8 @@ uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-
 ```
 
 To verify **both** implemented domains in one CPU-only command, run `uv run python -m scripts.multidomain_demo --output data/multidomain-demo`. This executes actual MuJoCo physics and a bundled agent process, then verifies, replays, and compares their saved failures. It neither deploys nor calls a paid provider.
+
+At the 20 October local verification snapshot, the full Python suite passed **193 tests**, and a mobile-sized browser smoke exercised the local Hunt/agent-trace flow. Those checks do not establish hosted sign-in, public frontend routing, physical G1 execution, or independent robotics review.
 
 For a phone preview, use an authenticated HTTPS reverse proxy or tunnel and set `GHOST_PUBLIC_DEPLOYMENT=true` with individual sign-in and the exact HTTPS frontend origin. `make mobile` refuses a non-loopback bind without those safeguards. `make dev` and the default Docker Compose port bind to host loopback only; never expose an authentication-disabled development server to the LAN or internet.
 
@@ -56,12 +65,14 @@ The [Ghost Hunt guide](docs/HUNT.md) documents supported worker controls, search
 - Primary Hunt workflow: bounded adaptive/random/grid search, parameterized SONIC/Arena recipes, mutation, exact repeats, conditional empirical boundaries, persisted Ghost Cases, and compatible-checkpoint regression
 - First-class authenticated `/hunts` and `/ghost-cases` API with organization isolation and paid-job admission on every candidate
 - Hunt, Failures, Trials, Compare, and System workspace navigation; physical capture and manual tools remain under System → Advanced
+- A compact sign-in screen and an Account page for profile-name updates, workspace identity, sign-in settings, and sign-out; provider credentials and email remain with the identity provider
+- AI-agent Hunts execute only allowlisted bundled reference targets with parent-mediated mock tools, versioned deterministic assertions, retained tool traces, exact reference replay, and case-specific corrected-target regression; untrusted customer executables are blocked
 
 - FastAPI API: `POST /scenarios`, `GET /trials`, `GET /trials/{id}`, `GET /safety-score`, and `WS /live`
 - Persistent, typed scenario and evaluation records
-- Seeded, replayable simulation metric adapter
+- Seeded, replayable MuJoCo execution with trace-derived metrics; the separate `local` adapter is synthetic development data
 - Versioned experimental rubric with evidence-aware incident reports, not demonstrated causal certification
-- Optional Nebius Token Factory / Nemotron judge with two-pass disagreement detection and Ultra escalation
+- Optional Nebius Token Factory / Nemotron review: one gated Super call for an artifact-verified CPU trial or agent trace; the separate legacy GPU judge supports two-pass disagreement detection and Ultra escalation
 - Orange application interface with custom vector branding, collapsible sidebar, and accessible mobile hamburger navigation
 - Separate Overview, Trial Runs, Scenario Library, Create Trial, Reports, System, and flight-record views
 - Searchable/filterable trial records, live progress, and JSON evidence exports
@@ -175,7 +186,7 @@ See [evaluation methodology and remaining validation](docs/EVALUATION.md), [free
 
 For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. Local CPU MuJoCo execution is real simulation; the optional G1/SONIC GPU path still requires its own acceptance run. The hosted Netlify preview is connected to a Railway CPU backend; verify its health and sign-in flow before presenting it as a working demo.
 
-For the hosted frontend and backend proxy configuration, see [Netlify deployment](docs/NETLIFY.md). Netlify needs a public HTTPS FastAPI origin; model and GPU credentials stay on the backend services.
+For the hosted frontend and backend proxy configuration, see [Netlify deployment](docs/NETLIFY.md). Netlify needs a public HTTPS FastAPI origin and the new `/agent-trials` proxy route before the agent UI can work there; model and GPU credentials stay on the backend services.
 
 ## License
 

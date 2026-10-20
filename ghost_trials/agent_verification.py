@@ -201,6 +201,12 @@ def verify_trial(trial: AgentTrial) -> bool:
     data = trial.model_dump(mode="json", exclude={"evidence_sha256"})
     if digest(data) != trial.evidence_sha256 or trial.adapter_version != HARNESS_VERSION:
         return False
+    # Legacy records remain readable, but an unpinned executable/runtime is not
+    # evidence of the currently registered reference target.
+    if (trial.target.source_digest != reference_source_digest()
+            or trial.runtime_id != RUNTIME_ID
+            or TARGETS.get(trial.target.target_id) != trial.target.version):
+        return False
     if trial.status == AgentVerdict.EXECUTION_ERROR:
         return bool(trial.error) and not trial.assertions
     if trial.error or any(e.authorized != (e.tool in trial.policy.allowed_tools and

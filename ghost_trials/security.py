@@ -52,6 +52,12 @@ class AccessControl:
                 raise ValueError("Production requires an identity provider or GHOST_ADMIN_TOKEN of at least 32 characters")
             if not settings.ghost_allowed_origins:
                 raise ValueError("Production requires explicit GHOST_ALLOWED_ORIGINS")
+        if settings.ghost_unauthenticated_local_dev and (
+                settings.ghost_public_deployment or os.environ.get("RAILWAY_ENVIRONMENT_ID")
+                or settings.ghost_mode == "production"):
+            raise ValueError("Unauthenticated development mode cannot run in a public deployment")
+        if not self.enabled and not settings.ghost_unauthenticated_local_dev:
+            raise ValueError("Configure individual authentication or explicitly enable loopback-only development mode")
 
     def token_role(self, token):
         for role, expected in self.tokens.items():
@@ -140,7 +146,7 @@ class AccessControl:
             if not role:
                 return JSONResponse({"detail": "Authentication required"}, 401)
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
-                if role == "viewer" and path not in {"/auth/logout", "/organizations", "/organizations/switch", "/organizations/invitations/accept"}:
+                if role == "viewer" and path not in {"/account", "/auth/logout", "/organizations", "/organizations/switch", "/organizations/invitations/accept"}:
                     return JSONResponse({"detail": "Read-only role"}, 403)
                 if not request.headers.get("authorization", "").startswith("Bearer ") and not self.origin_allowed(request):
                     return JSONResponse({"detail": "Untrusted request origin"}, 403)

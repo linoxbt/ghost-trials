@@ -29,6 +29,9 @@ async function main(){
       executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/google-chrome'});
     const page=await browser.newPage({viewport:{width:390,height:844}});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.goto('http://127.0.0.1:8765/auth/login');
+    await page.getByRole('heading',{name:'Sign in.'}).waitFor();
+    assert.equal(await page.getByText('Continue to your private evaluation workspace.').count(),0);
     assert.equal((await page.request.get('http://127.0.0.1:8765/docs/agent')).status(),200);
     await page.goto('http://127.0.0.1:8765/docs');
     await page.getByRole('heading',{name:'AI-agent software verification'}).waitFor();
@@ -53,10 +56,16 @@ async function main(){
     await page.goto('http://127.0.0.1:8765/app/#/failures');
     await page.locator('.hunt-list-item').first().click();
     await page.getByText('DETERMINISTIC ORACLE').waitFor();
-    await page.getByRole('button',{name:'Test corrected agent'}).click();
+    await page.getByRole('button',{name:'Test reference-corrected-v2'}).click();
     await page.getByText('verified success').waitFor();
+    await page.goto('http://127.0.0.1:8765/app/#/account');
+    await page.getByRole('heading',{name:'Account'}).waitFor();
+    await page.getByRole('heading',{name:'Profile'}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'Open account'}).getAttribute('aria-current'),'page');
+    await page.getByRole('link',{name:'Manage team & workspaces'}).click();
+    await page.getByRole('heading',{name:'Team & access'}).waitFor();
     assert.deepEqual(errors,[]);
-    console.log('Browser passed: mobile agent Hunt, real trace, Ghost Case, corrected-agent regression.');
+    console.log('Browser passed: minimal login, mobile agent Hunt, real trace, Ghost Case, regression, account navigation.');
   }finally{
     if(browser)await browser.close();
     try{process.kill(-server.pid,'SIGTERM');}catch{}

@@ -19,21 +19,31 @@ This is a code-level remediation record, not production approval or safety certi
 | Health check could report success with a stopped worker | Public `/health` now requires the job runner and database to respond | API regression test |
 | Agent trials were absent from the main Trials view | Tenant-scoped history and trace exports were added; active Hunt view uses a focused poll | Mobile browser smoke |
 | Database domain listing scanned all tenants in Python | SQLite organization index and filtered query were added; schema setup is not rerun on every connection | Full test suite and tenant-isolation tests |
+| Netlify omitted the exact `/agent-trials` route | The frontend proxy now includes agent trials and demonstration readiness; a generated-route test prevents recurrence | `tests/test_netlify_routes.py` |
+| A saved agent trace without source/runtime pinning could be rehashed into a verified state | Current verification requires the registered target version, source digest, and runtime identity; legacy records stay readable but unverified | Executable legacy-record test and agent API suite |
+| Cached Nemotron review could outlive changed evidence | Review reads and reuse now require current trace verification and matching evidence digest | Agent review and trace API tests |
+| Score and trial APIs trusted stale artifact-verification flags | Reporting, comparison, benchmark and Hunt outcome paths recheck retained simulator artifacts and use a downgraded copy when integrity fails | Actual MuJoCo bundle tampering and CPU/Hunt tests |
+| CPU controller digest omitted implementation code | New CPU evidence records pin a controller/worker source digest; the public reference bundle was regenerated from actual MuJoCo execution | CPU verifier, physics, reference and replay tests |
+| GPU “exact replay” could use a changed checkpoint | Completed GPU replays require the configured checkpoint and currently verified baseline evidence to match; blocked runs remain retriable but are not completed evidence | Replay API tests |
+| Direct Uvicorn startup could default to unauthenticated admin | No-auth startup requires an explicit local-development flag; public/Railway/production modes reject that flag | Startup auth tests; existing account/API suites |
+| Agent Hunt resume and alternate-target regression controls were incomplete | Agent Hunt now exposes the resume action; saved cases choose a different bundled target even when the baseline is corrected-v2 | Mobile browser smoke |
+| Frontend release could pair new UI with an old backend | `/health` declares the multidomain API contract; the Netlify workflow checks that contract and required routes before publishing | API test, route test, workflow inspection |
 
 Old agent records remain readable. Records without source/runtime pinning or using oracle v1 are marked `legacy_unverified` and cannot inherit v2 validation or be replayed as source-pinned evidence. The old records are not deleted or silently upgraded.
 
 ## Demonstrated locally
 
-- The full Python test suite passed **188 tests** after remediation. It includes actual MuJoCo execution and checked-in reference-agent subprocesses; fixtures and contract tests are not evidence of a physical G1 run.
-- `uv run --frozen --extra physics --extra models --extra storage python -m scripts.multidomain_demo --output <fresh-directory>` executed both domains, verified retained evidence, replayed a physical failure with the same measured final block position, and compared distinct controllers/agent versions.
+- The complete Python suite passed **193 tests** after the new fail-closed startup rule and fixture corrections. It includes actual MuJoCo execution and checked-in reference-agent subprocesses; fixtures and contract tests are not evidence of a physical G1 run.
+- `uv run --frozen python -m scripts.multidomain_demo --output <fresh-directory>` executed both domains, verified retained evidence, and compared distinct controllers/agent versions. The final smoke script now requires two matching physical replays before reporting a reproducible case; the standalone CPU smoke test passed that stricter check.
 - `PLAYWRIGHT_MODULE=/root/datatruth/node_modules/playwright node scripts/check_agent_frontend.cjs` exercised the authenticated-disabled **local** mobile-sized Hunt, trace, case, and regression flow. It does not validate public sign-in or the deployed release.
 
 ## Open release gates and limitations
 
 1. **Credential rotation — release blocker.** A Privy secret was previously exposed in conversation. The app owner must revoke/rotate it in Privy and replace the private backend environment value. Do not put the new secret in chat, Git, frontend variables, or a demo artifact. This cannot be completed by a repository patch.
-2. **Hosted validation — release blocker.** Publishing source code or a review branch does not deploy or validate this remediation. Verify production auth, a fresh signed-in Hunt, replay, artifact access, quotas, health, backups, and rollback on the intended Railway/Netlify release before calling it production-ready.
+2. **Hosted validation — release blocker.** The existing Railway production service is healthy but still deploys `main` commit `990454e` from 18 October 2026; this branch and its Netlify route fix are not live. This checkout is not linked to the Railway project. The new frontend deploy gate intentionally rejects the old backend contract. Verify production auth, a fresh signed-in Hunt, replay, artifact access, quotas, health, backups, and rollback after an authorized coordinated release before calling it production-ready.
 3. **External-model and robotics scope.** No new paid Nebius call, live Cosmos generation, Isaac/G1/SONIC trial, arbitrary customer-agent execution, or physical robot measurement was run here. The CPU MuJoCo and bundled-agent paths are the demonstrated scope. The reference-agent subprocess is not a secure isolation boundary for untrusted customer code.
 4. **Independent trust.** Hashes, source pinning, and metric recomputation detect several inconsistencies but are not hardware attestation or independent expert review.
 5. **Competition media.** The owner must record and publish a genuine <=3-minute demonstration with the required key modules; existing illustrations are not execution footage.
+6. **Versioned evidence migration.** Saved pre-pinning CPU records remain readable but cannot be reverified against a changed controller source. This is intentional: the original executable bytes were not retained. The public reference was regenerated; customer records require a fresh execution to obtain current source-pinned evidence.
 
 Do not publish a production-readiness claim until the release blockers are closed and recorded with evidence.

@@ -89,6 +89,7 @@ def test_public_cpu_deployment_fails_closed_without_login_configuration(tmp_path
 
 def test_public_cpu_deployment_accepts_private_api_configuration(tmp_path):
     settings=Settings(ghost_mode='cpu',ghost_public_deployment=True,
+        ghost_unauthenticated_local_dev=False,
         ghost_customer_auth_required=True,privy_app_id='testapp',ghost_cookie_secure=True,
         ghost_allowed_origins='https://console.test')
     assert AccessControl(settings,DurableStore(tmp_path/'state.sqlite3')).enabled
@@ -102,7 +103,7 @@ def test_railway_deployment_cannot_disable_public_auth_guard(tmp_path, monkeypat
 
 
 def test_public_dynamic_deployment_requires_environment_and_audience(tmp_path):
-    base=dict(ghost_mode='cpu',ghost_public_deployment=True,ghost_auth_provider='dynamic',
+    base=dict(ghost_mode='cpu',ghost_public_deployment=True,ghost_unauthenticated_local_dev=False,ghost_auth_provider='dynamic',
         ghost_customer_auth_required=True,ghost_cookie_secure=True,
         ghost_allowed_origins='https://console.test')
     with pytest.raises(ValueError,match='individual sign-in'):
@@ -208,6 +209,36 @@ async def test_verified_identity_and_revocable_session(identities):
         assert (await client.post('/auth/logout',headers={'Origin':'https://console.test'})).status_code==200
         client.cookies.set('ghost_session',stolen)
         assert (await client.get('/trials')).status_code==401
+
+
+@pytest.mark.asyncio
+async def test_account_profile_update_is_private_validated_and_available_to_viewers(identities):
+    app,_,store,_,token=identities
+    origin={'Origin':'https://console.test'}
+    transport=httpx.ASGITransport(app)
+    async with httpx.AsyncClient(transport=transport,base_url='http://test') as alice, \
+               httpx.AsyncClient(transport=transport,base_url='http://test') as bob:
+        assert (await alice.patch('/account',json={'display_name':'Ghost Operator'},headers=origin)).status_code==401
+        alice_org=await signin(alice,token())
+        await signin(bob,token('bob'))
+        assert (await alice.patch('/account',json={'display_name':'Ghost Operator'})).status_code==403
+        assert (await alice.patch('/account',json={'display_name':'  '},headers=origin)).status_code==422
+        assert (await alice.patch('/account',json={'display_name':'Name\nInjected'},headers=origin)).status_code==422
+        result=await alice.patch('/account',json={'display_name':'  Ghost Operator  '},headers=origin)
+        assert result.status_code==200,result.text
+        assert result.json()['display_name']=='Ghost Operator'
+        assert (await alice.get('/account')).json()['display_name']=='Ghost Operator'
+        assert (await bob.get('/account')).json()['display_name']=='New member'
+        members=(await alice.get('/organizations/current')).json()['members']
+        assert any(member['subject']=='did:privy:alice' and member['display_name']=='Ghost Operator'
+                   for member in members)
+        with store.connect() as db:
+            db.execute("UPDATE members SET role='viewer' WHERE organization_id=? AND subject=?",
+                       (alice_org,'did:privy:alice'))
+            assert db.execute("SELECT COUNT(*) FROM account_audit WHERE subject=? AND action='profile_updated'",
+                              ('did:privy:alice',)).fetchone()[0]==1
+        assert (await alice.patch('/account',json={'display_name':'Viewer Name'},headers=origin)).status_code==200
+        assert (await alice.get('/account')).json()['display_name']=='Viewer Name'
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,14 @@ jobs:
       - name: Build and check backend
         run: |
           python scripts/build_netlify.py
-          curl --fail --retry 3 "$GHOST_BACKEND_ORIGIN/health"
+          health="$(curl --fail --retry 3 --silent --show-error "$GHOST_BACKEND_ORIGIN/health")"
+          test "$(printf '%s' "$health" | jq -r '.api_contract')" = "multidomain-v1"
+          for path in agent-trials demonstration-readiness; do
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$GHOST_BACKEND_ORIGIN/$path")"
+            if [ "$status" != 200 ] && [ "$status" != 401 ]; then
+              echo "Backend route /$path is unavailable (HTTP $status)" >&2
+              exit 1
+            fi
+          done
       - name: Deploy
         run: npx --yes netlify-cli@23.6.0 deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"

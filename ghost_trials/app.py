@@ -28,6 +28,7 @@ from .agent_verification import (AgentHunt, AgentHuntObjective, AgentSearchSpace
                                  AgentGhostCase, AgentTrial, AgentVerdict, TARGETS,
                                  execute_reference, verify_trial, reference_source_digest, AgentTarget, RUNTIME_ID)
 from .agent_review import AgentNemotronReviewer
+from .retained_evidence import reporting_trial
 from .cpu_robot import CpuScenarioGenerator, CpuMujocoSimulator, CpuMeasuredJudge, BACKEND as CPU_BACKEND, controller as cpu_controller
 from .evaluation import (LIMITATIONS, benchmark_report, compare_trials, evidence_report, grouped_summary,
                          summarize, evidence_class, score_exclusion_reasons, reproducibility_report,
@@ -197,12 +198,31 @@ def owned_trial(request, trial_id):
     return trial
 
 
+async def checked_trial(trial):
+    return await asyncio.to_thread(reporting_trial, trial, store.scenarios[trial.scenario_id],
+                                   settings.ghost_artifact_root)
+
+
+async def checked_tenant_trials(request):
+    semaphore = asyncio.Semaphore(2)
+
+    async def bounded_check(trial):
+        async with semaphore:
+            return await checked_trial(trial)
+
+    return await asyncio.gather(*(bounded_check(trial) for trial in tenant_trials(request)))
+
+
 class PrivySessionRequest(BaseModel):
     access_token: str = Field(min_length=10, max_length=10000)
 
 
 class WorkspaceRequest(BaseModel):
     name: str = Field(min_length=2, max_length=80)
+
+
+class AccountUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=2, max_length=80)
 
 
 class OrganizationSwitch(BaseModel):
@@ -278,6 +298,14 @@ async def dynamic_session(body: PrivySessionRequest, request: Request):
 async def account(request: Request):
     principal = current_principal(request)
     return {**access.accounts.profile(principal), "active_organization_id": principal.organization_id,
+            "role": access.role(request), "authentication_kind": principal.kind}
+
+
+@app.patch("/account")
+async def update_account(body: AccountUpdateRequest, request: Request):
+    principal = access.require_account(request)
+    profile = access.accounts.update_display_name(principal, body.display_name)
+    return {**profile, "active_organization_id": principal.organization_id,
             "role": access.role(request), "authentication_kind": principal.kind}
 
 
@@ -477,6 +505,7 @@ async def health():
         raise HTTPException(503, "Database not ready") from exc
     return {
         "status": "ok",
+        "api_contract": "multidomain-v1",
         "mode": settings.ghost_mode,
         "scenario_provider": settings.ghost_scenario_provider,
         "simulator_provider": settings.ghost_simulator_provider,
@@ -740,8 +769,15 @@ async def get_agent_trial(trial_id: str, request: Request):
 @app.get("/agent-trials/{trial_id}/model-review")
 async def get_agent_model_review(trial_id: str, request: Request):
     trial = owned_agent_trial(request, trial_id)
+    if not verify_trial(trial) or trial.status not in {AgentVerdict.VERIFIED_FAILURE, AgentVerdict.VERIFIED_SUCCESS}:
+        return {"status": "unavailable", "trial_id": trial_id, "error": "evidence_not_verified"}
     raw = store.get_domain("agent_review", trial_id)
-    return json.loads(raw) if raw else {"status": "not_requested", "trial_id": trial.trial_id}
+    if raw:
+        review = json.loads(raw)
+        if review.get("evidence_sha256") != trial.evidence_sha256:
+            return {"status": "unavailable", "trial_id": trial_id, "error": "review_evidence_digest_mismatch"}
+        return review
+    return {"status": "not_requested", "trial_id": trial.trial_id}
 
 
 @app.post("/agent-trials/{trial_id}/model-review")
@@ -913,7 +949,7 @@ async def get_case_regression(case_id: str, trial_id: str, request: Request):
 
 @app.get("/trials", response_model=list[TrialView])
 async def list_trials(request: Request):
-    return [trial_view(trial) for trial in tenant_trials(request)]
+    return [trial_view(trial) for trial in await checked_tenant_trials(request)]
 
 
 def trial_view(trial):
@@ -925,13 +961,13 @@ def trial_view(trial):
 
 @app.get("/trials/{trial_id}", response_model=TrialView)
 async def get_trial(trial_id: str, request: Request):
-    trial = owned_trial(request, trial_id)
+    trial = await checked_trial(owned_trial(request, trial_id))
     return trial_view(trial)
 
 
 @app.get("/safety-score", response_model=SafetyScore)
 async def safety_score(request: Request):
-    trials = tenant_trials(request)
+    trials = await checked_tenant_trials(request)
     groups = grouped_summary(trials)
     result = summarize(trials)
     eligible_groups = [g for g in groups if g["scored_trials"] > 0]
@@ -951,19 +987,19 @@ async def safety_score(request: Request):
 
 @app.get("/trials/{trial_id}/evidence")
 async def trial_evidence(trial_id: str, request: Request):
-    trial = owned_trial(request, trial_id)
+    trial = await checked_trial(owned_trial(request, trial_id))
     return evidence_report(trial, store.scenarios[trial.scenario_id])
 
 
 @app.get("/trials/{trial_id}/reproducibility")
 async def trial_reproducibility(trial_id: str, request: Request):
-    trial = owned_trial(request, trial_id)
+    trial = await checked_trial(owned_trial(request, trial_id))
     return reproducibility_report(trial, store.scenarios[trial.scenario_id])
 
 
 @app.get("/demonstration-readiness")
 async def demo_readiness(request: Request):
-    return demonstration_readiness(tenant_trials(request))
+    return demonstration_readiness(await checked_tenant_trials(request))
 
 
 @app.post("/trials/{trial_id}/replay", response_model=PipelineAccepted, status_code=202)
@@ -972,7 +1008,15 @@ async def replay_trial(trial_id: str, request: Request):
     if original.execution_mode == "physical":
         raise HTTPException(409, "Physical replay requires a new on-site recording; remote motion is disabled")
     if original.status not in {TrialStatus.DONE, TrialStatus.BLOCKED}:
-        raise HTTPException(409, "Only a completed or blocked trial can be replayed")
+        raise HTTPException(409, "Only a completed or blocked trial can be retried")
+    if original.status == TrialStatus.DONE and settings.ghost_simulator_provider == "isaac_http":
+        metrics = original.metrics
+        if (not metrics or not settings.gr00t_checkpoint_digest
+                or metrics.policy_checkpoint_digest != settings.gr00t_checkpoint_digest
+                or original.policy_name != pipeline.policy_name):
+            raise HTTPException(409, "Configured checkpoint differs from the completed trial; use case regression")
+        if evidence_class(await checked_trial(original)) != "artifact_validated_simulation":
+            raise HTTPException(409, "Exact replay requires currently verified baseline evidence")
     if store.scenarios[original.scenario_id].structured_description.hazard_type == "pending_generation":
         raise HTTPException(409, "Scenario generation must finish before reusing a scenario")
     role = access.require(request, ("admin", "operator"))
@@ -1079,13 +1123,14 @@ async def readiness(request: Request):
 
 @app.get("/comparisons")
 async def comparisons(baseline: str, candidate: str, request: Request):
-    left, right = owned_trial(request, baseline), owned_trial(request, candidate)
+    baseline_trial, candidate_trial = owned_trial(request, baseline), owned_trial(request, candidate)
+    left, right = await asyncio.gather(checked_trial(baseline_trial), checked_trial(candidate_trial))
     return compare_trials(left, right, store.scenarios[left.scenario_id], store.scenarios[right.scenario_id])
 
 
 @app.get("/benchmarks")
 async def benchmarks(request: Request):
-    return benchmark_report(tenant_trials(request), store.scenarios)
+    return benchmark_report(await checked_tenant_trials(request), store.scenarios)
 
 
 @app.websocket("/live")
