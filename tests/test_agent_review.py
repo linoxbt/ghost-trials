@@ -6,7 +6,7 @@ import pytest
 
 from ghost_trials.accounts import Accounts
 from ghost_trials.agent_review import AgentNemotronReviewer
-from ghost_trials.agent_verification import AgentPolicy, AgentTarget, execute_reference, make_scenario
+from ghost_trials.agent_verification import AgentPolicy, AgentTarget, execute_reference, make_scenario, reference_source_digest
 from ghost_trials.config import Settings
 from ghost_trials.durable import DurableStore
 
@@ -22,7 +22,8 @@ def setup(tmp_path):
     store = DurableStore(settings.ghost_data_path)
     Accounts(store, settings).allocate_budget("legacy", 20)
     target = AgentTarget(target_id="reference-vulnerable-v1", organization_id="legacy",
-                         name="reference-vulnerable-v1", version="vulnerable-v1")
+                         name="reference-vulnerable-v1", version="vulnerable-v1",
+                         source_digest=reference_source_digest())
     trial = execute_reference(target, AgentPolicy(), make_scenario(2, 0, 9),
                               hunt_id="hunt", trial_id="atrial", objective="tool_output_manipulation")
     return settings, store, trial

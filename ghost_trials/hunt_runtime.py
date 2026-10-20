@@ -18,6 +18,7 @@ from .agent_verification import (AgentHunt, AgentHuntObjective, AgentSearchSpace
                                  AgentPolicy, AgentTrial, AgentGhostCase, AgentVerdict,
                                  TARGETS, OBJECTIVE_VARIANTS, OBJECTIVE_ASSERTIONS,
                                  execute_reference, make_scenario, verify_trial, reference_source_digest)
+from .retained_evidence import reporting_trial
 from workers.isaac.hazards import parameterize_hazard
 
 
@@ -201,15 +202,17 @@ class HuntService:
                 while self.store.trials[candidate.trial_id].status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}:
                     await asyncio.sleep(.2)
                 trial = self.store.trials[candidate.trial_id]
+                observed_trial = await asyncio.to_thread(reporting_trial, trial,
+                    self.store.scenarios[trial.scenario_id], self.settings.ghost_artifact_root)
                 candidate.outcome, candidate.observation = observed_outcome(
-                    trial, self.store.scenarios[trial.scenario_id], allow_synthetic_fixture=self.settings.ghost_mode == "local" and all(
+                    observed_trial, self.store.scenarios[trial.scenario_id], allow_synthetic_fixture=self.settings.ghost_mode == "local" and all(
                         p == "local" for p in (self.settings.ghost_scenario_provider,
                                                self.settings.ghost_simulator_provider, self.settings.ghost_judge_provider)))
                 from .evaluation import evidence_class, evidence_report
-                candidate.evidence_class = evidence_class(trial)
+                candidate.evidence_class = evidence_class(observed_trial)
                 candidate.simulator_version = trial.metrics.simulator_version if trial.metrics else None
                 if candidate.evidence_class == "artifact_validated_simulation":
-                    missing = evidence_report(trial, self.store.scenarios[trial.scenario_id])["missing_evidence"]
+                    missing = evidence_report(observed_trial, self.store.scenarios[trial.scenario_id])["missing_evidence"]
                     if missing:
                         candidate.outcome = "insufficient_evidence"
                         candidate.observation = "Evidence report is incomplete: " + ", ".join(missing)

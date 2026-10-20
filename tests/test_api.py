@@ -26,6 +26,7 @@ async def test_api_accepts_and_completes_trial(tmp_path):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             health = await client.get("/health")
             assert health.status_code == 200
+            assert health.json()["api_contract"] == "multidomain-v1"
             assert (await client.get("/assets/app.css")).status_code == 200
             assert (await client.get("/assets/app.js")).status_code == 200
             assert (await client.get("/assets/production.css")).status_code == 200

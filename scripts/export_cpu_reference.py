@@ -20,9 +20,12 @@ ARTIFACTS = ("recipe.json", "summary.json", "telemetry.jsonl", "trajectory.svg",
              "manifest.json", "verification.json", "scenario.json")
 
 
-async def export(target: Path) -> dict:
-    if target.exists() and any(target.iterdir()):
+async def export(target: Path, *, replace: bool = False) -> dict:
+    if target.exists() and any(target.iterdir()) and not replace:
         raise ValueError("Reference target must be new and empty; remove old assets only after explicit review")
+    if replace and target.exists() and (target.is_symlink() or
+            any(path.is_symlink() or path.name not in {*ARTIFACTS, "index.json"} for path in target.iterdir())):
+        raise ValueError("Reference target contains unexpected files or symlinks")
     with tempfile.TemporaryDirectory(prefix="ghost-reference-") as directory:
         source = Path(directory)
         report = await run(source, live_nebius=False, seed=42)
@@ -57,8 +60,9 @@ async def export(target: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("static/reference/gantry-v1"))
+    parser.add_argument("--replace", action="store_true", help="Refresh the checked-in reference after review")
     args = parser.parse_args()
-    print(json.dumps(asyncio.run(export(args.output)), indent=2))
+    print(json.dumps(asyncio.run(export(args.output, replace=args.replace)), indent=2))
 
 
 if __name__ == "__main__":

@@ -50,7 +50,10 @@ class AgentNemotronReviewer:
             return AgentModelReview(status="unavailable", error="evidence_not_verified", **base)
         existing = self.store.get_domain("agent_review", trial.trial_id)
         if existing:
-            return AgentModelReview.model_validate_json(existing)
+            saved = AgentModelReview.model_validate_json(existing)
+            if saved.evidence_sha256 == trial.evidence_sha256:
+                return saved
+            return AgentModelReview(status="unavailable", error="review_evidence_digest_mismatch", **base)
         if not self.settings.ghost_agent_model_review_enabled:
             return AgentModelReview(status="disabled", **base)
         if not (self.settings.ghost_live_execution_enabled

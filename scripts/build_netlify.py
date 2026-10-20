@@ -31,8 +31,9 @@ def main() -> None:
     (TARGET / "docs" / "agent").mkdir(exist_ok=True)
     (TARGET / "docs" / "agent" / "index.html").write_bytes((SOURCE / "agent-guide.html").read_bytes())
 
-    exact = ("health", "capabilities", "scenarios", "trials", "hunts", "ghost-cases", "failure-families", "safety-score",
-             "benchmarks", "comparisons", "openapi.json", "api/docs", "api/redoc", "ready", "account", "organizations", "agent-targets")
+    exact = ("health", "capabilities", "scenarios", "trials", "agent-trials", "hunts", "ghost-cases",
+             "failure-families", "safety-score", "benchmarks", "comparisons", "demonstration-readiness",
+             "openapi.json", "api/docs", "api/redoc", "ready", "account", "organizations", "agent-targets")
     wildcards = ("trials/*", "hunts/*", "ghost-cases/*", "agent-trials/*", "artifacts/*", "generated/*", "auth/*", "ops/*", "organizations/*", "physical/*")
     rules = [f"/{path} {ORIGIN}/{path} 200!" for path in exact]
     rules.extend(f"/{path} {ORIGIN}/{path.replace('*', ':splat')} 200!" for path in wildcards)

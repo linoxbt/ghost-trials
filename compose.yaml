@@ -7,6 +7,7 @@ services:
       # This compose file publishes only to host loopback. Internet-facing
       # deployments use the guarded entrypoint with public auth enabled.
       GHOST_PUBLIC_DEPLOYMENT: "false"
+      GHOST_UNAUTHENTICATED_LOCAL_DEV: "true"
     env_file:
       - path: .env
         required: false

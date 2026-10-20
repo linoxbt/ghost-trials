@@ -61,11 +61,11 @@ supported. An app secret is not needed for this flow.
    and exact HTTPS origins in `GHOST_ALLOWED_ORIGINS`.
 5. Run `npm ci`, `npm run build:auth`, and start exactly one API worker.
 
-The page checks which login methods Privy actually enables. Passkey sign-in and
-new-account creation remain visible but disabled until their corresponding
-dashboard settings are enabled. Existing email/Google users should sign in first
-and use **Create passkey for this account** so they retain the same workspace;
-creating a new passkey account can create a separate identity. Public login settings are
+The page shows only login methods that Privy currently reports as enabled.
+Existing email/Google users should sign in first and use **Create a passkey for
+this account** so they retain the same workspace; the Account page links back
+to sign-in, where a passkey action appears only if the provider enables it. Creating a new passkey
+account can create a separate identity. Public login settings are
 cached for one minute, verification keys for five. Provider/key failures reject
 verification rather than accepting unsigned tokens. Plain HTTP localhost needs
 secure cookies disabled for local development only; the HTTPS phone preview
@@ -86,6 +86,14 @@ or demoted. Existing membership roles are never changed by invitation replay.
 Invitations are bearer links: share them privately with the intended teammate.
 The app does not email invitations or bind a link to an email address. Recipients
 sign in through the configured provider, accept the invitation and enter the invited workspace.
+
+The **Account** page is available from the workspace avatar and sidebar. It
+shows the provider-backed identity, active workspace, role and sign-out action.
+Individually signed-in users can edit their display name through authenticated
+`PATCH /account`; the update is audited and visible to members of their
+workspaces. It does not change their provider identity, email or login method.
+Shared deployment tokens and unauthenticated local development sessions cannot
+edit a profile.
 
 Trials, scores, benchmarks, comparisons, replay/cancel, previews, videos, traces
 and live events are filtered by active organization. Foreign IDs return 404.

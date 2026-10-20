@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from .cpu_robot import ROBOT_ID, controller, initial_block_y, validate_recipe
+from .cpu_robot import ROBOT_ID, controller, controller_source_digest, initial_block_y, validate_recipe
 
 
 ARTIFACTS = ("telemetry.jsonl", "recipe.json", "summary.json", "trajectory.svg")
@@ -46,7 +46,8 @@ def verify_cpu_bundle(root: Path, expected_digest: str) -> dict:
     deployed = controller(summary["policy_id"])
     if (summary["robot_model"] != ROBOT_ID or summary["simulator"] != "MuJoCo"
             or not summary.get("simulator_version") or summary["policy_version"] != deployed.version
-            or summary["policy_digest"] != expected_digest or deployed.digest != expected_digest):
+            or summary["policy_digest"] != expected_digest or deployed.digest != expected_digest
+            or summary.get("controller_source_digest") != controller_source_digest()):
         raise ValueError("Controller identity mismatch")
     rows = [json.loads(line) for line in (root / "telemetry.jsonl").read_text().splitlines() if line]
     if len(rows) != summary["trace_samples"] or len(rows) < 2 or len(rows) > 2000:

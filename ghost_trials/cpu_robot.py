@@ -36,6 +36,16 @@ DEFAULTS = {"object_mass_kg": 0.15, "surface_friction": 0.3,
             "object_position_x_m": 0.4, "controller_delay_s": 0.0}
 
 
+def controller_source_digest() -> str:
+    """Pin executable physics/controller code in addition to controller parameters."""
+    root = Path(__file__).resolve().parent
+    checksum = hashlib.sha256()
+    for name in ("cpu_robot.py", "cpu_worker.py"):
+        checksum.update(name.encode())
+        checksum.update((root / name).read_bytes())
+    return checksum.hexdigest()
+
+
 def initial_block_y(seed: int) -> float:
     """Seeded millimetre-scale pose perturbation, replayed exactly with the recipe."""
     return round(random.Random(seed).uniform(-0.003, 0.003), 7)
@@ -273,7 +283,7 @@ def execute(config: dict, policy_id: str) -> tuple[dict, list[dict], str]:
     final_x = float(data.body("block").xpos[0])
     success = 0.64 <= final_x <= 0.86 and abs(float(data.body("block").xpos[1])) <= 0.12
     result = {"robot_model": ROBOT_ID, "policy_id": policy_id, "policy_version": policy.version,
-              "policy_digest": policy.digest,
+              "policy_digest": policy.digest, "controller_source_digest": controller_source_digest(),
               "simulator": "MuJoCo", "simulator_version": mujoco.__version__,
               "simulation_duration_s": round(float(data.time), 6), "wall_duration_s": round(elapsed, 6),
               "object_initial_x_m": initial_x, "object_final_x_m": round(final_x, 6),

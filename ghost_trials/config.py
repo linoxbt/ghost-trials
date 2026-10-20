@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     dynamic_environment_id: str | None = None
     dynamic_jwt_audience: str | None = None
     ghost_customer_auth_required: bool = False
+    ghost_unauthenticated_local_dev: bool = False
     ghost_public_deployment: bool = False
     ghost_public_signup_enabled: bool = True
     ghost_privy_session_seconds: int = Field(default=3600, ge=60, le=86400)

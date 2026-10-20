@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from ghost_trials.agent_verification import (AgentGhostCase, AgentPolicy, AgentTarget, AgentVerdict, TARGETS,
-                                              execute_reference, make_scenario, verify_trial, reference_source_digest)
+                                              digest, execute_reference, make_scenario, verify_trial, reference_source_digest)
 from ghost_trials.app import app, lifespan, store, settings, access
 from ghost_trials.accounts import Principal
 
@@ -50,6 +50,16 @@ def test_changed_reference_source_is_not_silently_replayed():
     with pytest.raises(ValueError, match="source changed"):
         execute_reference(invalid, AgentPolicy(), make_scenario(0, 0, 7),
                           hunt_id="h", trial_id="changed", objective="task_completion")
+
+
+def test_legacy_agent_record_cannot_become_verified_by_rehashing():
+    trial = execute_reference(target(), AgentPolicy(), make_scenario(2, 0, 7),
+                              hunt_id="h", trial_id="legacy", objective="tool_output_manipulation")
+    assert verify_trial(trial)
+    trial.target.source_digest = None
+    trial.runtime_id = None
+    trial.evidence_sha256 = digest(trial.model_dump(mode="json", exclude={"evidence_sha256"}))
+    assert not verify_trial(trial)
 
 
 def test_real_reference_execution_and_oracle():
@@ -143,6 +153,7 @@ async def test_agent_hunt_replay_regression_and_persistence(tmp_path):
             evidence.pop("evidence_verified")
             store.put_domain("agent_trial", baseline_id, json.dumps(evidence))
             assert (await client.get(f"/agent-trials/{baseline_id}")).json()["evidence_verified"] is False
+            assert (await client.get(f"/agent-trials/{baseline_id}/model-review")).json()["status"] == "unavailable"
             assert (await client.get(f"/ghost-cases/{case_id}")).json()["evidence_verification"]["status"] == "invalid"
             assert (await client.get(f"/ghost-cases/{case_id}")).json()["reproduction_status"] == "incomplete"
             assert (await client.get(f"/ghost-cases/{case_id}/regressions")).json()[0]["outcome"] == "incompatible_or_unverified"
