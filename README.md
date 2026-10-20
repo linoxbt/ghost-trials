@@ -5,12 +5,13 @@
 Ghost Trials is an **experimental autonomous failure-discovery and verification platform**. It supports the existing Physical AI workflow and a controlled AI-agent reference domain. Give it an executable target and a task; it searches bounded conditions for failures, verifies recorded evidence, reproduces findings, and replays saved Ghost Cases against another version. It is not a safety-certification service. The default robotics path runs real headless MuJoCo physics on CPU. The agent path executes only bundled reference agents with in-memory mock tools; arbitrary customer code remains blocked. The original Unitree G1/SONIC/Isaac path remains optional and has not been demonstrated end to end in this deployment.
 
 For the implemented two-domain contract, trust boundaries, oracle methodology, replay limitations, and one-command CPU demonstration, see [AI Agent Verification](docs/AGENT_VERIFICATION.md).
+The latest code-level audit and unresolved release gates are in [Audit remediation status](docs/AUDIT_REMEDIATION.md).
 
 The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. A separately gated NVIDIA Nemotron review through Nebius Token Factory can interpret every verified CPU trial; model failure never changes the measured outcome. NVIDIA/Nebius services are not dependencies of CPU physics. The legacy `local` adapter remains synthetic and is development-only.
 
 ## Hackathon submission
 
-The existing [Devpost submission draft](submission.md) and [judge-facing PDF dossier](submission.pdf) describe an earlier CPU-physics/Nemotron evidence snapshot; they **predate this AI-agent milestone** and must be revised before submission. Personal details, numeric ratings, project-history confirmation, the signed-in production demo and public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
+The [Devpost submission draft](submission.md) describes the local AI-agent milestone, but the [judge-facing PDF dossier](submission.pdf) predates it and must be refreshed before submission. Personal details, numeric ratings, project-history confirmation, the signed-in production demo and public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
 
 ## Quick start
 
@@ -36,7 +37,7 @@ uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-
 
 To verify **both** implemented domains in one CPU-only command, run `uv run python -m scripts.multidomain_demo --output data/multidomain-demo`. This executes actual MuJoCo physics and a bundled agent process, then verifies, replays, and compares their saved failures. It neither deploys nor calls a paid provider.
 
-For a phone on the same network, run `make mobile`, determine this machine's LAN IP, and open `http://<LAN-IP>:8000` on the phone. Do not expose the development server directly to the public internet.
+For a phone preview, use an authenticated HTTPS reverse proxy or tunnel and set `GHOST_PUBLIC_DEPLOYMENT=true` with individual sign-in and the exact HTTPS frontend origin. `make mobile` refuses a non-loopback bind without those safeguards. `make dev` and the default Docker Compose port bind to host loopback only; never expose an authentication-disabled development server to the LAN or internet.
 
 ```bash
 uv run pytest

@@ -7,6 +7,7 @@ import json
 import uuid
 import time
 import random
+from pathlib import Path
 
 from .adapters import ExecutionBlocked
 from .hunt import (GhostCase, Hunt, HuntObjective, HuntPlanner, HuntStatus, PolicyVersion, TrialCandidate,
@@ -16,7 +17,7 @@ from .models import ScenarioCreate, TrialStatus
 from .agent_verification import (AgentHunt, AgentHuntObjective, AgentSearchSpace, AgentTarget,
                                  AgentPolicy, AgentTrial, AgentGhostCase, AgentVerdict,
                                  TARGETS, OBJECTIVE_VARIANTS, OBJECTIVE_ASSERTIONS,
-                                 execute_reference, make_scenario, verify_trial)
+                                 execute_reference, make_scenario, verify_trial, reference_source_digest)
 from workers.isaac.hazards import parameterize_hazard
 
 
@@ -35,9 +36,10 @@ EXECUTABLE_TASKS = {
 
 
 class HuntService:
-    def __init__(self, store, pipeline, settings, admission, admission_lock):
+    def __init__(self, store, pipeline, settings, admission, admission_lock, agent_admission=None):
         self.store, self.pipeline, self.settings = store, pipeline, settings
         self.admission, self.admission_lock = admission, admission_lock
+        self.agent_admission = agent_admission or admission
         self.tasks: dict[str, asyncio.Task] = {}
         self.agent_slots = asyncio.Semaphore(2)
 
@@ -48,8 +50,8 @@ class HuntService:
         return (AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)
 
     def list(self, organization_id: str) -> list[Hunt | AgentHunt]:
-        return [hunt for raw in self.store.list_domain("hunt")
-                if (hunt := (AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)).organization_id == organization_id]
+        return [(AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)
+                for raw in self.store.list_domain_for_org("hunt", organization_id)]
 
     def save(self, hunt: Hunt | AgentHunt):
         from .models import utc_now
@@ -60,7 +62,8 @@ class HuntService:
                      max_trials: int, strategy: str, policy: AgentPolicy | None = None,
                      search_space: AgentSearchSpace | None = None, max_wall_seconds: int = 60) -> AgentHunt:
         target = AgentTarget(target_id=target_id, organization_id=organization_id,
-                             name=target_id, version=TARGETS[target_id]) if target_id in TARGETS else None
+                             name=target_id, version=TARGETS[target_id],
+                             source_digest=reference_source_digest()) if target_id in TARGETS else None
         if target is None:
             raise ValueError("Only bundled reference agents are supported; external code execution is blocked")
         permitted = OBJECTIVE_VARIANTS[objective.verification_objective]
@@ -251,19 +254,103 @@ class HuntService:
         if not raw:
             return None
         case = (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)
-        return self._checked_agent_case(case)
+        return self._checked_agent_case(case) if isinstance(case, AgentGhostCase) else self._checked_physical_case(self._with_manual_replays(case))
 
     def cases(self, organization_id: str) -> list[GhostCase | AgentGhostCase]:
-        return [self._checked_agent_case(case) for raw in self.store.list_domain("ghost_case")
-                if (case := (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)).organization_id == organization_id]
+        replay_rows = [json.loads(raw) for raw in self.store.list_domain_for_org("case_replay", organization_id)]
+        trial_rows = list(self.store.trials.values())
+        return [self._checked_agent_case(case) if isinstance(case, AgentGhostCase) else self._checked_physical_case(
+                    self._with_manual_replays(case, replay_rows, trial_rows))
+                for raw in self.store.list_domain_for_org("ghost_case", organization_id)
+                if (case := (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw))]
+
+    def _checked_physical_case(self, case: GhostCase) -> GhostCase:
+        """Recheck retained baseline bytes; a saved verification flag is not proof of current integrity."""
+        trial = self.store.trials.get(case.baseline_trial_id)
+        try:
+            case.evidence_verification = self._verify_physical_bundle(case, trial, baseline=True)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            case.evidence_verification = {"status": "invalid_retained_evidence"}
+            case.reproduction.status = "incomplete" if case.reproduction.attempts else "unattempted"
+        return case
+
+    def _verify_physical_bundle(self, case: GhostCase, trial, *, baseline: bool = False) -> dict:
+        if not trial or not trial.metrics or trial.organization_id != case.organization_id:
+            raise ValueError("Saved trial is unavailable or outside case organization")
+        root = Path(self.settings.ghost_artifact_root).resolve()
+        directory = (root / "trials" / trial.trial_id).resolve()
+        if not directory.is_relative_to(root):
+            raise ValueError("Unsafe retained artifact path")
+        if trial.metrics.policy_checkpoint_digest != case.policy.checkpoint_digest:
+            raise ValueError("Saved trial differs from case checkpoint")
+        if baseline and trial.metrics.artifact_manifest != case.artifact_manifest:
+            raise ValueError("Saved trial differs from case manifest")
+        if case.policy.embodiment == "GHOST_GANTRY_XY":
+            from .cpu_evidence import verify_cpu_bundle
+            verification = verify_cpu_bundle(directory, case.policy.checkpoint_digest)
+            manifest = json.loads((directory / "manifest.json").read_text())
+            summary = json.loads((directory / "summary.json").read_text())
+            if (manifest != trial.metrics.artifact_manifest or
+                    json.loads((directory / "recipe.json").read_text()) != case.execution_recipe or
+                    summary != trial.metrics.robot_metrics or
+                    baseline and summary != case.measured_metrics.get("robot_metrics")):
+                raise ValueError("Retained CPU evidence differs from trial or case")
+        else:
+            from .independent_validation import verify_bundle
+            verification = verify_bundle(directory, case.policy.checkpoint_digest)
+            manifest = json.loads((directory / "result.json").read_text())["artifacts"]
+            if manifest != trial.metrics.artifact_manifest or baseline and manifest != case.artifact_manifest:
+                raise ValueError("Retained worker manifest differs from saved trial or case")
+        return verification
+
+    def _with_manual_replays(self, case: GhostCase, rows=None, trial_rows=None) -> GhostCase:
+        rows = rows if rows is not None else [json.loads(raw) for raw in self.store.list_domain_for_org("case_replay", case.organization_id)]
+        trial_rows = trial_rows if trial_rows is not None else self.store.trials.values()
+        ids = list(dict.fromkeys(case.reproduction.attempts +
+                                  [row["trial_id"] for row in rows if row.get("case_id") == case.case_id] +
+                                  [trial.trial_id for trial in trial_rows
+                                   if trial.replay_of == case.baseline_trial_id
+                                   and trial.organization_id == case.organization_id
+                                   and trial.policy_name == case.policy.name]))
+        attempts = []
+        invalid = False
+        from .evaluation import evidence_report
+        for trial_id in ids:
+            trial = self.store.trials.get(trial_id)
+            if trial is None or (trial.replay_of != case.baseline_trial_id and trial_id not in case.reproduction.attempts):
+                invalid = True
+                continue
+            scenario = self.store.scenarios.get(trial.scenario_id)
+            if (not scenario or scenario.execution_recipe != case.execution_recipe or
+                    not trial.metrics or trial.metrics.policy_checkpoint_digest != case.policy.checkpoint_digest or
+                    evidence_report(trial, scenario)["missing_evidence"]):
+                invalid = True
+                continue
+            try:
+                self._verify_physical_bundle(case, trial)
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                invalid = True
+                continue
+            attempts.append(trial)
+        case.reproduction = reproduction_result(case, attempts)
+        if invalid:
+            case.reproduction.attempts = ids
+            case.reproduction.status = "incomplete"
+        return case
 
     def _checked_agent_case(self, case):
         if isinstance(case, AgentGhostCase):
             baseline = self.agent_trial(case.baseline_trial_id)
             valid = bool(baseline and baseline.organization_id == case.organization_id
                          and baseline.evidence_sha256 == case.evidence_sha256 and verify_trial(baseline))
-            case.evidence_verification = {"status": "verified" if valid else "invalid",
-                                          "oracle_version": "agent-oracle-v1"}
+            legacy = bool(baseline and (not baseline.target.source_digest or not baseline.runtime_id or
+                                        any(a.version != "agent-oracle-v2" for a in baseline.assertions)))
+            case.evidence_verification = {"status": "verified" if valid else
+                                          "legacy_unverified" if legacy else "invalid",
+                                          "oracle_version": baseline.assertions[0].version
+                                              if baseline and baseline.assertions else "unknown"}
+            case.reproduction_status = (self._agent_reproduction_status(case) if valid else
+                                        "incomplete" if case.reproduction_trial_ids else "unattempted")
         return case
 
     def agent_trial(self, trial_id: str) -> AgentTrial | None:
@@ -281,18 +368,29 @@ class HuntService:
             if len(repeats) < 2:
                 return TrialCandidate(sequence=n, phase="reproduce", controls=anchor.controls.copy(), seed=anchor.seed)
             variant = int(anchor.controls["attack_variant"])
-            neighbors = [p for p in hunt.search_space.pressures if p != int(anchor.controls["pressure"])]
-            pressure = neighbors[sum(c.phase == "mutate" for c in hunt.candidates) % len(neighbors)] if neighbors else int(anchor.controls["pressure"])
+            # Pressure changes only variant 2. Never count an unchanged
+            # effective scenario as a new mutation or coverage point.
+            options = ([(variant, p) for p in hunt.search_space.pressures if variant == 2] +
+                       [(v, hunt.search_space.pressures[0]) for v in hunt.search_space.attack_variants if v != variant])
+            tried = {(int(c.controls["attack_variant"]), int(c.controls["pressure"]))
+                     for c in hunt.candidates if c.phase != "reproduce"}
+            next_option = next(((v, p) for v, p in options if (v, p) not in tried), None)
+            if next_option is None:
+                return None
+            variant, pressure = next_option
             phase = "mutate"
         else:
             variants = [v for v in (0, 2, 1, 3, 4) if v in hunt.search_space.attack_variants]
+            options = [(v, p) for v in variants for p in
+                       (hunt.search_space.pressures if v == 2 else hunt.search_space.pressures[:1])]
             if hunt.strategy == "random":
-                rng = random.Random(f"{hunt.hunt_id}:{n}")
-                variant = rng.choice(variants)
-                pressure = rng.choice(hunt.search_space.pressures)
-            else:
-                variant = variants[(n - 1) % len(variants)]
-                pressure = hunt.search_space.pressures[((n - 1) // len(variants)) % len(hunt.search_space.pressures)]
+                random.Random(hunt.hunt_id).shuffle(options)
+            tried = {(int(c.controls["attack_variant"]), int(c.controls["pressure"]))
+                     for c in hunt.candidates if c.phase != "reproduce"}
+            next_option = next(((v, p) for v, p in options if (v, p) not in tried), None)
+            if next_option is None:
+                return None
+            variant, pressure = next_option
             phase = "explore"
         seed = int(hashlib.sha256(f"{hunt.hunt_id}:{n}".encode()).hexdigest()[:8], 16) % 2_147_483_647
         if phase in {"reproduce", "mutate"}:
@@ -317,7 +415,7 @@ class HuntService:
                 self.save(hunt)
                 await self.admission_lock.acquire()
                 try:
-                    self.admission()
+                    self.agent_admission()
                     if not self.store.get_domain("agent_reservation", trial_id):
                         today = int(time.time() // 86400)
                         used = sum(int(json.loads(raw)["at"] // 86400) == today
@@ -342,14 +440,14 @@ class HuntService:
                     self.store.put_domain("agent_trial", trial_id, trial.model_dump_json())
                     self.store.audit("agent_trial_completed", "operator", trial_id,
                                      organization_id=hunt.organization_id, subject=subject)
-                if not verify_trial(trial):
-                    candidate.outcome = "insufficient_evidence"
-                    candidate.observation = "Evidence digest mismatch"
-                    hunt.status = HuntStatus.BLOCKED
-                elif trial.status == AgentVerdict.EXECUTION_ERROR:
+                if trial.status == AgentVerdict.EXECUTION_ERROR and verify_trial(trial):
                     candidate.outcome = "provider_error"
                     candidate.observation = trial.error
                     hunt.provider_errors.append(f"{trial_id}: {trial.error}")
+                    hunt.status = HuntStatus.BLOCKED
+                elif not verify_trial(trial):
+                    candidate.outcome = "insufficient_evidence"
+                    candidate.observation = "Evidence digest mismatch or invalid oracle record"
                     hunt.status = HuntStatus.BLOCKED
                 elif trial.status == AgentVerdict.VERIFIED_FAILURE:
                     candidate.outcome = "failure"
@@ -371,21 +469,7 @@ class HuntService:
                     for case_id in hunt.case_ids:
                         case = self.case(case_id)
                         if isinstance(case, AgentGhostCase) and case.scenario == scenario:
-                            if trial_id not in case.reproduction_trial_ids:
-                                case.reproduction_trial_ids.append(trial_id)
-                            attempts = [self.agent_trial(tid) for tid in case.reproduction_trial_ids]
-                            statuses = [t.status for t in attempts if t and verify_trial(t)]
-                            if len(statuses) != len(case.reproduction_trial_ids) or AgentVerdict.EXECUTION_ERROR in statuses:
-                                case.reproduction_status = "incomplete"
-                            elif len(statuses) < 2:
-                                case.reproduction_status = "incomplete"
-                            elif all(s == AgentVerdict.VERIFIED_FAILURE for s in statuses):
-                                case.reproduction_status = "reproducible"
-                            elif AgentVerdict.VERIFIED_FAILURE in statuses:
-                                case.reproduction_status = "flaky"
-                            else:
-                                case.reproduction_status = "not_reproduced"
-                            self.store.put_domain("ghost_case", case_id, case.model_dump_json())
+                            self.record_agent_reproduction(case, trial)
                 candidate.evidence_class = "validated_agent_trace" if verify_trial(trial) else "invalid"
                 candidate.simulator_version = hunt.adapter_version
                 self.save(hunt)
@@ -408,6 +492,28 @@ class HuntService:
             hunt.status = HuntStatus.BLOCKED
             hunt.provider_errors.append(f"Agent Hunt stopped ({type(exc).__name__}); no policy failure inferred")
             self.save(hunt)
+
+    def record_agent_reproduction(self, case: AgentGhostCase, trial: AgentTrial):
+        if trial.trial_id not in case.reproduction_trial_ids:
+            case.reproduction_trial_ids.append(trial.trial_id)
+        case.reproduction_status = self._agent_reproduction_status(case)
+        self.store.put_domain("ghost_case", case.case_id, case.model_dump_json())
+
+    def _agent_reproduction_status(self, case: AgentGhostCase) -> str:
+        if not case.reproduction_trial_ids:
+            return "unattempted"
+        attempts = [self.agent_trial(tid) for tid in case.reproduction_trial_ids]
+        if any(not t or t.organization_id != case.organization_id or t.target != case.target or
+               t.policy != case.policy or t.objective != case.objective or t.scenario != case.scenario or
+               not verify_trial(t) for t in attempts):
+            return "incomplete"
+        statuses = [t.status for t in attempts]
+        if len(statuses) < 2 or any(s not in {AgentVerdict.VERIFIED_FAILURE, AgentVerdict.VERIFIED_SUCCESS}
+                                    for s in statuses):
+            return "incomplete"
+        if all(s == AgentVerdict.VERIFIED_FAILURE for s in statuses):
+            return "reproducible"
+        return "flaky" if AgentVerdict.VERIFIED_FAILURE in statuses else "not_reproduced"
 
     def _update_reproduction(self, hunt: Hunt, candidate):
         matching = [c for c in hunt.candidates if c.phase == "reproduce" and c.controls == candidate.controls

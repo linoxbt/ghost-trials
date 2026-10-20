@@ -77,7 +77,7 @@ Check that Netlify `/health` returns 200, unauthenticated `/trials` returns 401,
 and an authenticated user can start and inspect a CPU Hunt. A Git push alone
 does not invoke the repository's manual frontend deployment workflow.
 
-The active CPU settings are `GHOST_MODE=cpu`, `GHOST_SCENARIO_PROVIDER=cpu`, `GHOST_SIMULATOR_PROVIDER=mujoco_cpu`, `GHOST_JUDGE_PROVIDER=cpu`, `GHOST_EXECUTION_BACKEND=mujoco_cpu`, and `GHOST_POLICY_NAME=gantry-push-v1`. For a CPU-only Docker host, `docker compose up --build` uses these defaults if `.env` is absent. If an existing `.env` selects production/GPU providers, set the CPU values explicitly in the deployment environment; never publish keys in frontend variables. Persistent data and artifacts should be mounted or backed up. Protect public deployments with the existing authentication and HTTPS reverse proxy; a development server on port 8000 must not be exposed directly.
+The active CPU settings are `GHOST_MODE=cpu`, `GHOST_SCENARIO_PROVIDER=cpu`, `GHOST_SIMULATOR_PROVIDER=mujoco_cpu`, `GHOST_JUDGE_PROVIDER=cpu`, `GHOST_EXECUTION_BACKEND=mujoco_cpu`, and `GHOST_POLICY_NAME=gantry-push-v1`. The container entrypoint now defaults to public-deployment safeguards and refuses startup without individual sign-in and exact HTTPS origins. For loopback-only Docker development, explicitly set `GHOST_PUBLIC_DEPLOYMENT=false` and do not publish the port beyond localhost. If an existing `.env` selects production/GPU providers, set the CPU values explicitly in the deployment environment; never publish keys in frontend variables. Persistent data and artifacts should be mounted or backed up. A development server on port 8000 must not be exposed directly.
 
 ## Evidence and measurements
 

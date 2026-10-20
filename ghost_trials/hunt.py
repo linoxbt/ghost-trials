@@ -363,7 +363,7 @@ def reproduction_result(case: GhostCase, trials: list[Trial]) -> ReproductionRes
     usable = [o for o in outcomes if o in {"pass", "failure", "near_failure"}]
     failures = usable.count("failure")
     errors = outcomes.count("provider_error")
-    status = ("unattempted" if not trials else "incomplete" if errors or len(usable) != len(trials)
+    status = ("unattempted" if not trials else "incomplete" if errors or len(usable) != len(trials) or len(usable) < 2
               else "reproducible" if failures == len(usable) and len(usable) >= 2
               else "flaky" if failures else "not_reproduced")
     return ReproductionResult(attempts=[t.trial_id for t in trials], failures=failures,

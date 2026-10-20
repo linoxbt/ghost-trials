@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# A container listening publicly must fail closed unless individual auth and
+# exact HTTPS origins are configured. Local developers may explicitly opt out.
+export GHOST_PUBLIC_DEPLOYMENT="${GHOST_PUBLIC_DEPLOYMENT:-true}"
+
 # Railway persistent volumes are initially root-owned. Its RAILWAY_RUN_UID=0
 # setting lets this entrypoint assign only the dedicated /data mount, then drop
 # privileges before the API starts. The API process always runs as UID 10001.

@@ -6,6 +6,7 @@ import json
 import time
 import re
 import uuid
+import os
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
@@ -24,7 +25,7 @@ class AccessControl:
         self.enabled = bool(self.tokens or identity_configured or settings.ghost_customer_auth_required)
         if self.tokens and (any(len(token) < 32 for token in self.tokens.values()) or len(set(self.tokens.values())) != len(self.tokens)):
             raise ValueError("Role tokens must be distinct and at least 32 characters")
-        if settings.ghost_public_deployment:
+        if settings.ghost_public_deployment or os.environ.get("RAILWAY_ENVIRONMENT_ID"):
             if not settings.ghost_customer_auth_required or not identity_configured:
                 raise ValueError("Public deployment requires individual sign-in")
             if settings.ghost_auth_provider == "dynamic" and not settings.dynamic_jwt_audience:

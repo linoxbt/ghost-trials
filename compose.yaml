@@ -2,7 +2,11 @@ services:
   dashboard:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    environment:
+      # This compose file publishes only to host loopback. Internet-facing
+      # deployments use the guarded entrypoint with public auth enabled.
+      GHOST_PUBLIC_DEPLOYMENT: "false"
     env_file:
       - path: .env
         required: false
