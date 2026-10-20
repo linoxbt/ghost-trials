@@ -62,6 +62,13 @@ async function main(){
     await page.getByRole('heading',{name:'Account'}).waitFor();
     await page.getByRole('heading',{name:'Profile'}).waitFor();
     assert.equal(await page.getByRole('link',{name:'Open account'}).getAttribute('aria-current'),'page');
+    assert.equal(await page.getByText('Open sign-in page').count(),0);
+    assert.equal(await page.getByText('Account ID').count(),0);
+    assert.equal(await page.locator('#navigation a[href="#/system"]').count(),0);
+    assert.equal(await page.getByRole('link',{name:'Physical recordings'}).count(),1);
+    await page.goto('http://127.0.0.1:8765/app/#/system');
+    await page.getByRole('heading',{name:'Page not found'}).waitFor();
+    await page.goto('http://127.0.0.1:8765/app/#/account');
     await page.getByRole('link',{name:'Manage team & workspaces'}).click();
     await page.getByRole('heading',{name:'Team & access'}).waitFor();
     assert.deepEqual(errors,[]);
