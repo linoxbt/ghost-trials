@@ -1,5 +1,6 @@
 import json
 import hashlib
+import asyncio
 import subprocess
 import sys
 
@@ -8,6 +9,9 @@ import pytest
 from ghost_trials.cpu_robot import BACKEND, available_policies, controller, execute, recipe, validate_recipe
 from ghost_trials.cpu_evidence import verify_cpu_bundle
 from ghost_trials.hunt import default_space
+from ghost_trials.hunt_runtime import HuntService
+from ghost_trials.durable import DurableStore
+from ghost_trials.config import Settings
 
 
 def test_cpu_physics_loads_robot_and_measures_success_and_failure():
@@ -61,10 +65,18 @@ def test_cpu_full_api_hunt_replay_regression_and_evidence(tmp_path):
     bundle = tmp_path / "artifacts" / "trials" / report["artifact_directory"].split("/")[-1]
     summary = json.loads((bundle / "summary.json").read_text())
     assert verify_cpu_bundle(bundle, summary["policy_digest"])["status"] == "cpu_trace_metrics_verified"
+    retained = DurableStore(tmp_path / "state.sqlite3")
+    asyncio.run(retained.load())
+    service = HuntService(retained, None, Settings(_env_file=None, ghost_artifact_root=tmp_path / "artifacts"), None, None)
+    assert service.case(report["case_id"]).evidence_verification["status"] == "cpu_trace_metrics_verified"
     trace = bundle / "telemetry.jsonl"
     trace.write_text(trace.read_text().replace("object_position_m", "faked_position_m", 1))
     with pytest.raises(ValueError, match="hash mismatch"):
         verify_cpu_bundle(bundle, summary["policy_digest"])
+    assert service.case(report["case_id"]).evidence_verification["status"] == "invalid_retained_evidence"
+    from ghost_trials.app import regression_view
+    assert regression_view(service.case(report["case_id"]), retained.trials[report["candidate_trial_id"]])[
+        "outcome"] == "incompatible_or_unverified"
     trace.write_text(trace.read_text().replace("faked_position_m", "object_position_m", 1))
     summary["task_completed"] = not summary["task_completed"]
     summary_bytes = json.dumps(summary).encode()

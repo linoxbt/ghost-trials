@@ -94,6 +94,13 @@ def test_public_cpu_deployment_accepts_private_api_configuration(tmp_path):
     assert AccessControl(settings,DurableStore(tmp_path/'state.sqlite3')).enabled
 
 
+def test_railway_deployment_cannot_disable_public_auth_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv('RAILWAY_ENVIRONMENT_ID', 'test-railway-environment')
+    with pytest.raises(ValueError, match='Public deployment requires'):
+        AccessControl(Settings(_env_file=None, ghost_mode='cpu', ghost_public_deployment=False),
+                      DurableStore(tmp_path/'state.sqlite3'))
+
+
 def test_public_dynamic_deployment_requires_environment_and_audience(tmp_path):
     base=dict(ghost_mode='cpu',ghost_public_deployment=True,ghost_auth_provider='dynamic',
         ghost_customer_auth_required=True,ghost_cookie_secure=True,

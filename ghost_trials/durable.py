@@ -8,6 +8,7 @@ import json
 import sqlite3
 import time
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from .store import TrialStore
 
 
 class DurableStore(TrialStore):
+    _schema_lock = threading.Lock()
+
     @property
     def database_path(self):
         return self.path if self.path.suffix in {".db", ".sqlite3"} else self.path.with_suffix(".sqlite3")
@@ -27,9 +30,11 @@ class DurableStore(TrialStore):
         # Set the main-file mode before SQLite creates WAL/shared-memory files.
         os.chmod(self.database_path, 0o600)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=FULL")
-        connection.executescript("""
+        with self._schema_lock:
+            if getattr(self, "_schema_path", None) != self.database_path:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.executescript("""
             CREATE TABLE IF NOT EXISTS records(kind TEXT, id TEXT, payload TEXT NOT NULL,
                                                PRIMARY KEY(kind,id));
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, state TEXT NOT NULL,
@@ -39,7 +44,9 @@ class DurableStore(TrialStore):
                 at REAL NOT NULL, action TEXT NOT NULL, role TEXT NOT NULL, target TEXT);
             CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY, window INTEGER, count INTEGER);
             CREATE TABLE IF NOT EXISTS controls(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS records_org ON records(kind, json_extract(payload, '$.organization_id'));
         """)
+                self._schema_path = self.database_path
         try:
             with connection:
                 yield connection
@@ -95,7 +102,7 @@ class DurableStore(TrialStore):
         self.trials[trial.trial_id] = trial
 
     def put_domain(self, kind: str, record_id: str, payload: str):
-        if kind not in {"hunt", "ghost_case", "regression", "agent_trial", "agent_target", "agent_reservation", "agent_review"}:
+        if kind not in {"hunt", "ghost_case", "case_replay", "regression", "agent_trial", "agent_target", "agent_reservation", "agent_review"}:
             raise ValueError("Unsupported domain record")
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO records VALUES(?,?,?)", (kind, record_id, payload))
@@ -108,6 +115,12 @@ class DurableStore(TrialStore):
     def list_domain(self, kind: str):
         with self.connect() as db:
             return [row[0] for row in db.execute("SELECT payload FROM records WHERE kind=? ORDER BY id DESC", (kind,))]
+
+    def list_domain_for_org(self, kind: str, organization_id: str):
+        with self.connect() as db:
+            return [row[0] for row in db.execute(
+                "SELECT payload FROM records WHERE kind=? AND json_extract(payload, '$.organization_id')=? ORDER BY id DESC",
+                (kind, organization_id))]
 
     def enqueue(self, trial_id, request_key=None, request_hash=None):
         with self.connect() as db:

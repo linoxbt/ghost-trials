@@ -72,6 +72,9 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
                 await asyncio.sleep(.1)
             if repeated["status"] != "done" or repeated["metrics"]["task_completed"]:
                 raise RuntimeError("Exact failure replay did not reproduce")
+            case = (await client.get(f"/ghost-cases/{case['case_id']}")).json()
+            if replay_id not in case["reproduction"]["attempts"]:
+                raise RuntimeError("Completed physical replay was not retained on its Ghost Case")
             print(f"Failure replayed: {replay_id}", flush=True)
             regression = await client.post(f"/ghost-cases/{case['case_id']}/regressions",
                                            json={"policy_id": "gantry-push-v2"})
@@ -108,7 +111,7 @@ async def run(root: Path, trials: int, strategy: str = "adaptive", policy_id: st
                     "regression_outcome": result["outcome"], "candidate_trial_id": regression_id,
                     "candidate_final_x_m": candidate_trial["metrics"]["robot_metrics"]["object_final_x_m"],
                     "candidate_policy_digest": candidate_trial["metrics"]["policy_checkpoint_digest"],
-                    "automatic_reproduction_status": case["reproduction"]["status"],
+                    "reproduction_status": case["reproduction"]["status"],
                     "empirical_boundary": case["boundary"]["statement"] if case.get("boundary") else None,
                     "artifact_directory": str(bundle)}
     return report

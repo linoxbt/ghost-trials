@@ -14,7 +14,8 @@ def main() -> None:
                       GHOST_SIMULATOR_PROVIDER="mujoco_cpu", GHOST_JUDGE_PROVIDER="cpu",
                       GHOST_EXECUTION_BACKEND="mujoco_cpu", GHOST_POLICY_NAME="gantry-push-v1")
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
-        print("Warning: bind is public/LAN-accessible; configure existing authentication and HTTPS first.")
+        if os.environ.get("GHOST_PUBLIC_DEPLOYMENT", "").lower() != "true":
+            raise SystemExit("Non-loopback CPU server requires GHOST_PUBLIC_DEPLOYMENT=true and configured individual sign-in")
     import uvicorn
     uvicorn.run("ghost_trials.app:app", host=args.host, port=args.port)
 

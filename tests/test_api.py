@@ -7,6 +7,15 @@ from ghost_trials.app import app, lifespan, store
 
 
 @pytest.mark.asyncio
+async def test_public_health_fails_if_worker_is_not_running(monkeypatch):
+    from ghost_trials.app import runner
+    monkeypatch.setattr(runner, "task", None)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/health")
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_api_accepts_and_completes_trial(tmp_path):
     store.path = tmp_path / "api-state.json"
     store.scenarios.clear()

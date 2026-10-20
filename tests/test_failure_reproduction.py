@@ -22,6 +22,7 @@ def test_reproduction_honestly_reports_flaky_failure():
                      recording_url="/video.mp4", telemetry_url="/trace.jsonl")
     result = reproduction_result(case, [checked_trial("t1", True), checked_trial("t2", False)])
     assert result.status == "flaky" and result.failures == 1 and result.attempts == ["t1", "t2"]
+    assert reproduction_result(case, [checked_trial("single", True)]).status == "incomplete"
     assert reproduction_result(case, [checked_trial("t1", True), checked_trial("t2", True)]).status == "reproducible"
 
 
