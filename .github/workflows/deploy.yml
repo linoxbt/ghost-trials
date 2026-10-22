@@ -10,7 +10,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       GHOST_MODE: local
       GHOST_PIPELINE_DELAY_SECONDS: "0"
@@ -22,7 +22,14 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install recording-validation tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        # Runner apt mirrors occasionally stall; bound each attempt and retry.
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2 3; do
+            timeout 150 sudo apt-get update && timeout 150 sudo apt-get install -y --no-install-recommends ffmpeg && exit 0
+            sleep 10
+          done
+          exit 1
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: "0.11.21"
