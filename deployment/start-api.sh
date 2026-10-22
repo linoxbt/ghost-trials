@@ -10,11 +10,14 @@ export GHOST_PUBLIC_DEPLOYMENT="${GHOST_PUBLIC_DEPLOYMENT:-true}"
 # privileges before the API starts. The API process always runs as UID 10001.
 if [ "$(id -u)" = 0 ]; then
   chown 10001:10001 /data
-  for path in /data/state.json /data/state.sqlite3 /data/state.sqlite3-wal /data/state.sqlite3-shm /data/artifacts; do
+  for path in /data/state.json /data/state.sqlite3 /data/state.sqlite3-wal /data/state.sqlite3-shm; do
     if [ -e "$path" ]; then chown 10001:10001 "$path"; fi
   done
+  # Evidence written by an earlier root process must stay readable and writable by the API user.
+  if [ -d /data/artifacts ]; then chown -R 10001:10001 /data/artifacts; fi
   exec setpriv --reuid=10001 --regid=10001 --clear-groups \
-    uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}"
+    uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --log-config /app/deployment/logging.json
 fi
 
-exec uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}"
+# One worker only: SQLite state is guarded by a single-process lease.
+exec uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --log-config /app/deployment/logging.json

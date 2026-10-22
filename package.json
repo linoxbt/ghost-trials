@@ -4,7 +4,8 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "build:auth": "node scripts/build_auth.mjs"
+    "build:auth": "node scripts/build_auth.mjs",
+    "check:ui": "sh scripts/run_ui_checks.sh"
   },
   "dependencies": {
     "@dynamic-labs/sdk-react-core": "5.10.0",
@@ -13,7 +14,8 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0"
   },
   "overrides": {
     "ws": "8.21.0",

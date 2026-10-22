@@ -82,7 +82,7 @@ def render(source: Path, output: Path) -> None:
 | NVIDIA / Nebius | One completed live Nemotron 3 Super review of a verified MuJoCo trial through Token Factory |
 | Not demonstrated | Physical robot, G1/SONIC/GR00T worker, live Cosmos generation, Nebius AI Cloud GPU or safety certification |
 
-**Live application:** https://ghost-trials.netlify.app/
+**Live application:** https://ghosttrials.site/
 
 **Public source and MIT license:** https://github.com/linoxbt/ghost-trials
 

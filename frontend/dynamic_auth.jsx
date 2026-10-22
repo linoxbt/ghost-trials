@@ -25,7 +25,14 @@ function DynamicSignIn({api}){
     try{
       await api('/auth/dynamic/session',{access_token});
       const invite=location.pathname==='/auth/invite'?location.hash.slice(1):'';
-      if(invite){const result=await api('/organizations/invitations/accept',{token:invite});
+      if(invite){
+        let result;
+        try{result=await api('/organizations/invitations/accept',{token:invite});}
+        catch(err){
+          // The session already exists; drop the spent invitation so the next click opens the user's own workspace.
+          history.replaceState(null,'','/auth/login');
+          throw new Error(`${err.message} You are signed in: select Open workspace to continue, or ask for a new invitation.`);
+        }
         await api('/organizations/switch',{organization_id:result.organization_id});}
       location.replace(new URLSearchParams(location.search).get('manage')==='passkey'?'/app/#/account':'/app/');
     }catch(err){setError(err.message);setBusy(false);}

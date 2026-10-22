@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import io
-import json
 import tarfile
 
 import httpx
@@ -134,6 +133,7 @@ async def test_concurrent_submissions_do_not_exceed_quota(private_api, monkeypat
     app, settings, store, tokens = private_api
     monkeypatch.setattr(settings, "ghost_max_jobs_per_day", 3)
     monkeypatch.setattr(settings, "ghost_max_pending_jobs", 100)
+    monkeypatch.setattr(store, "org_job_limits", (100, 100))
     headers = {"Authorization": "Bearer " + tokens["operator"]}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
         responses = await asyncio.gather(*(client.post("/scenarios", headers=headers,
@@ -273,3 +273,94 @@ def test_full_decode_rejects_signature_only_fixture(tmp_path):
     path.write_bytes(b"\x00\x00\x00\x18ftypisom")
     with pytest.raises(ValueError, match="decode"):
         decode_video(path)
+
+
+@pytest.mark.asyncio
+async def test_one_workspace_cannot_exhaust_platform_quota(private_api, monkeypatch):
+    app, settings, store, tokens = private_api
+    monkeypatch.setattr(settings, "ghost_max_pending_jobs", 100)
+    monkeypatch.setattr(store, "org_job_limits", (100, 2))
+    headers = {"Authorization": "Bearer " + tokens["operator"]}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        responses = [await client.post("/scenarios", headers=headers, json={"prompt": "A box falls suddenly", "seed": seed})
+                     for seed in range(4)]
+    assert [r.status_code for r in responses] == [202, 202, 429, 429]
+    assert "daily trial allowance" in responses[-1].json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_logged_out_role_session_cookie_cannot_be_replayed(private_api):
+    app, _, _, tokens = private_api
+    origin = {"Origin": "https://console.test"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        await client.post("/auth/session", headers=origin, json={"token": tokens["operator"]})
+        stolen = client.cookies.get("ghost_session")
+        assert (await client.post("/auth/logout", headers=origin)).status_code == 200
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test",
+                                 cookies={"ghost_session": stolen}) as replay:
+        assert (await replay.get("/trials")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unreadable_record_is_reported_not_fatal(tmp_path):
+    store = DurableStore(tmp_path / "state.sqlite3")
+    with store.connect() as db:
+        db.execute("INSERT INTO records VALUES('trial','trl_bad','{\"not\": \"a trial\"}')")
+        assert db.execute("PRAGMA user_version").fetchone()[0] >= 1
+    await store.load()
+    assert store.unreadable_records == [{"kind": "trial", "id": "trl_bad"}]
+
+
+@pytest.mark.asyncio
+async def test_cancel_refunds_unused_reservation(tmp_path):
+    from ghost_trials.models import Scenario, StructuredDescription, Trial
+    store = DurableStore(tmp_path / "state.sqlite3")
+    with store.connect() as db:
+        db.execute("CREATE TABLE IF NOT EXISTS budgets(id TEXT PRIMARY KEY,limit_cents INTEGER NOT NULL,used_cents INTEGER NOT NULL DEFAULT 0)")
+        db.execute("INSERT INTO budgets VALUES('org_a',100,0)")
+    scenario = Scenario(scenario_id="scn_r", prompt="A box falls suddenly", seed=1, severity_tag="medium", structured_description=StructuredDescription(
+        objects=[], hazard_type="pending_generation", severity="medium", expected_safe_behavior="x"))
+    trial = Trial(trial_id="trl_r", scenario_id="scn_r", organization_id="org_a")
+    store.submit(scenario, trial, reservation_cents=30, platform_limit=100)
+    assert store.cancel_queued("trl_r") and not store.cancel_queued("trl_r")
+    with store.connect() as db:
+        assert {r["id"]: r["used_cents"] for r in db.execute("SELECT * FROM budgets")} == {"platform": 0, "org_a": 0}
+
+
+def test_client_address_respects_proxy_configuration():
+    from types import SimpleNamespace
+    from ghost_trials.security import AccessControl
+    from ghost_trials.config import Settings
+    request = lambda xff=None: SimpleNamespace(client=SimpleNamespace(host="10.0.0.1"),
+                                              headers={"x-forwarded-for": xff} if xff else {})
+    access = AccessControl(Settings(_env_file=None), None)
+    assert access.client_ip(request()) == "10.0.0.1"
+    # Behind an unconfigured proxy every client would share the proxy's address: no per-client bucket.
+    assert access.client_ip(request("198.51.100.7, 203.0.113.2")) is None
+    access.settings = Settings(_env_file=None, ghost_trusted_proxy_hops=2)
+    assert access.client_ip(request("198.51.100.7, 203.0.113.2")) == "198.51.100.7"
+    assert access.client_ip(request("192.0.2.9, 198.51.100.7, 203.0.113.2")) == "198.51.100.7"
+
+
+@pytest.mark.asyncio
+async def test_oversized_hunt_is_rejected_before_it_starts(private_api, monkeypatch):
+    app, settings, store, tokens = private_api
+    monkeypatch.setattr(settings, "ghost_max_org_jobs_per_day", 5)
+    headers = {"Authorization": "Bearer " + tokens["operator"]}
+    body = {"objective": {"task": "position a block with gantry arm", "environment": "CPU MuJoCo tabletop",
+                          "hazard_type": "object_positioning"}, "max_trials": 6, "strategy": "adaptive"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        response = await client.post("/hunts", headers=headers, json=body)
+    assert response.status_code == 429 and "more trials today" in response.json()["detail"]
+
+
+def test_role_cookie_without_jti_is_rejected():
+    import base64, hashlib, hmac, json as _json, time as _time
+    from ghost_trials.config import Settings
+    from ghost_trials.security import AccessControl
+    access = AccessControl(Settings(_env_file=None, ghost_admin_token="a" * 48), None)
+    payload = base64.urlsafe_b64encode(_json.dumps({"role": "admin", "exp": int(_time.time()) + 60,
+        "version": hashlib.sha256(("a" * 48).encode()).hexdigest()}).encode()).decode()
+    legacy = payload + "." + hmac.new(("a" * 48).encode(), payload.encode(), hashlib.sha256).hexdigest()
+    assert access.cookie_role(legacy) is None
+    assert access.cookie_role(access.session("admin")) == "admin"

@@ -1,14 +1,31 @@
 # One API worker only. Start from repository root with --env-file explicitly.
 services:
+  # Named volumes start root-owned; this one-shot step hands /data to the API user and exits.
+  data-permissions:
+    build:
+      context: ..
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+    volumes:
+      - ghost-production:/data
+    cap_drop: ["ALL"]
+    # CHOWN changes owners; DAC_READ_SEARCH lets root traverse the image's 0700 /data owned by 10001.
+    cap_add: ["CHOWN", "DAC_READ_SEARCH"]
+    network_mode: none
   dashboard:
     build:
       context: ..
     restart: unless-stopped
     init: true
+    # The command below bypasses start-api.sh, so the unprivileged user is set here.
+    user: "10001:10001"
     env_file: [./private/production.env, ./private/access.env]
     environment:
       GHOST_DATA_PATH: /data/state.sqlite3
       GHOST_ARTIFACT_ROOT: /data/artifacts
+      GHOST_PUBLIC_DEPLOYMENT: "true"
+    depends_on:
+      data-permissions: {condition: service_completed_successfully}
     command: ["uvicorn", "ghost_trials.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log", "--log-config", "/app/deployment/logging.json"]
     volumes:
       - ghost-production:/data
@@ -45,6 +62,7 @@ services:
     build:
       context: ..
     restart: unless-stopped
+    user: "10001:10001"
     env_file: [./private/production.env, ./private/access.env]
     environment:
       GHOST_MONITOR_ORIGIN: http://dashboard:8000

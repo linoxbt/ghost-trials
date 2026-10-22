@@ -20,6 +20,7 @@ const origin=process.env.GHOST_PREVIEW_URL||'http://127.0.0.1:8012';
  await page.goto(origin+'/app/#/team');
  await page.getByRole('heading',{name:'Workspace members',exact:true}).waitFor();
  await page.getByRole('button',{name:'Create invitation link'}).click();
+ await page.waitForFunction(()=>document.getElementById('inviteLink')?.value);
  assert.equal(await page.getByLabel('Invitation link').inputValue(),origin+'/auth/invite#ui-test-only-not-a-real-invite');
  await page.getByLabel('Role for did:privy:fixture-member').selectOption('operator');
  await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('permissions updated'));

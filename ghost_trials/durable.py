@@ -5,6 +5,7 @@ pipeline adapters and cache are process-local. Scale-out requires a new worker
 and database architecture, not simply extra Uvicorn workers.
 """
 import json
+import logging
 import sqlite3
 import time
 import os
@@ -14,6 +15,24 @@ from pathlib import Path
 
 from .models import Scenario, Trial
 from .store import TrialStore
+
+
+MIGRATIONS = [
+    # 1: queue/admission lookups and logout revocation.
+    """
+    CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state);
+    CREATE INDEX IF NOT EXISTS jobs_submitted ON jobs(submitted);
+    CREATE TABLE IF NOT EXISTS revoked_sessions(jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+    """,
+]
+
+
+class QuotaExceeded(Exception):
+    """An admission limit was reached; reported to clients as HTTP 429."""
+
+
+class PendingQuotaExceeded(QuotaExceeded):
+    """Too many queued trials right now; waiting for the queue to drain resolves it."""
 
 
 class DurableStore(TrialStore):
@@ -46,6 +65,11 @@ class DurableStore(TrialStore):
             CREATE TABLE IF NOT EXISTS controls(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS records_org ON records(kind, json_extract(payload, '$.organization_id'));
         """)
+                # Ordered, append-only schema changes tracked with PRAGMA user_version.
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
+                    connection.executescript(script)
+                    connection.execute(f"PRAGMA user_version={number}")
                 self._schema_path = self.database_path
         try:
             with connection:
@@ -70,10 +94,18 @@ class DurableStore(TrialStore):
     async def load(self):
         with self.connect() as db:
             rows = db.execute("SELECT * FROM records").fetchall()
-        self.scenarios = {row["id"]: Scenario.model_validate_json(row["payload"])
-                          for row in rows if row["kind"] == "scenario"}
-        self.trials = {row["id"]: Trial.model_validate_json(row["payload"])
-                       for row in rows if row["kind"] == "trial"}
+        # One unreadable row must not keep the whole API from starting; it is reported, never deleted.
+        self.unreadable_records = []
+        self.scenarios, self.trials = {}, {}
+        for row in rows:
+            model, target = {"scenario": (Scenario, self.scenarios), "trial": (Trial, self.trials)}.get(row["kind"], (None, None))
+            if model is None:
+                continue
+            try:
+                target[row["id"]] = model.model_validate_json(row["payload"])
+            except ValueError:
+                logging.getLogger(__name__).error("unreadable_record kind=%s id=%s", row["kind"], row["id"])
+                self.unreadable_records.append({"kind": row["kind"], "id": row["id"]})
         # One-time import of the legacy file. Never overwrite it.
         if not rows and self.path.suffix == ".json" and self.path.exists():
             payload = json.loads(self.path.read_text())
@@ -102,10 +134,16 @@ class DurableStore(TrialStore):
         self.trials[trial.trial_id] = trial
 
     def put_domain(self, kind: str, record_id: str, payload: str):
-        if kind not in {"hunt", "ghost_case", "case_replay", "regression", "agent_trial", "agent_target", "agent_reservation", "agent_review"}:
+        if kind not in {"hunt", "ghost_case", "case_replay", "regression", "agent_trial", "agent_target", "agent_reservation", "agent_review", "idempotency"}:
             raise ValueError("Unsupported domain record")
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO records VALUES(?,?,?)", (kind, record_id, payload))
+            if kind in self.EXPIRING_KINDS:
+                # Admission bookkeeping only matters for the current day; keep a short margin.
+                db.execute("DELETE FROM records WHERE kind=? AND json_extract(payload,'$.at')<?",
+                           (kind, time.time() - 3 * 86400))
+
+    EXPIRING_KINDS = {"agent_reservation", "idempotency"}
 
     def get_domain(self, kind: str, record_id: str):
         with self.connect() as db:
@@ -127,10 +165,42 @@ class DurableStore(TrialStore):
             db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted) VALUES(?,?,?,?,?)",
                        (trial_id, "queued", request_key, request_hash, time.time()))
 
+    # (pending, per-day) execution caps for one organization; None disables them.
+    org_job_limits: tuple[int, int] | None = None
+
+    def org_job_counts(self, db, organization_id):
+        day_start = int(time.time() // 86400) * 86400
+        pending, today = db.execute(
+            "SELECT SUM(j.state IN ('queued','running')), SUM(j.submitted>=?) FROM jobs j "
+            "JOIN records r ON r.kind='trial' AND r.id=j.id WHERE json_extract(r.payload,'$.organization_id')=?",
+            (day_start, organization_id)).fetchone()
+        return int(pending or 0), int(today or 0)
+
+    def org_usage(self, organization_id):
+        """(pending, submitted today) trial jobs for one organization."""
+        with self.connect() as db:
+            return self.org_job_counts(db, organization_id)
+
+    def agent_reservations_today(self, organization_id=None):
+        day_start = int(time.time() // 86400) * 86400
+        query = "SELECT COUNT(*) FROM records WHERE kind='agent_reservation' AND json_extract(payload,'$.at')>=?"
+        args = [day_start]
+        if organization_id is not None:
+            query += " AND json_extract(payload,'$.organization_id')=?"
+            args.append(organization_id)
+        with self.connect() as db:
+            return db.execute(query, args).fetchone()[0]
+
     def submit(self, scenario, trial, request_key=None, request_hash=None, *, reservation_cents=0, platform_limit=0, subject="system"):
         # Acceptance and idempotency become durable in the same transaction.
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if self.org_job_limits and trial.organization_id:
+                pending, today = self.org_job_counts(db, trial.organization_id)
+                if pending >= self.org_job_limits[0]:
+                    raise PendingQuotaExceeded("This workspace already has the maximum number of queued trials")
+                if today >= self.org_job_limits[1]:
+                    raise QuotaExceeded("This workspace has used its daily trial allowance")
             if reservation_cents:
                 from .accounts import reserve_budget
                 reserve_budget(db, trial.trial_id, trial.organization_id, reservation_cents, platform_limit)
@@ -187,6 +257,24 @@ class DurableStore(TrialStore):
                        "finished=CASE WHEN ? IN ('done','error','cancelled','blocked') THEN ? ELSE finished END WHERE id=?",
                        (state, state, time.time(), state, time.time(), trial_id))
 
+    def cancel_queued(self, trial_id) -> bool:
+        """Cancel only if the runner has not claimed the job; refund its unused admission reservation."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("UPDATE jobs SET state='cancelled',finished=? WHERE id=? AND state='queued'",
+                          (time.time(), trial_id)).rowcount != 1:
+                return False
+            has_reservations = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reservations'").fetchone()
+            row = db.execute("SELECT organization_id,cents FROM reservations WHERE trial_id=?",
+                             (trial_id,)).fetchone() if has_reservations else None
+            if row:
+                # Nothing executed, so no external cost was incurred for this reservation.
+                for account in ("platform", row["organization_id"]):
+                    db.execute("UPDATE budgets SET used_cents=MAX(0,used_cents-?) WHERE id=?", (row["cents"], account))
+                db.execute("DELETE FROM reservations WHERE trial_id=?", (trial_id,))
+        return True
+
     def claim(self):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -201,6 +289,20 @@ class DurableStore(TrialStore):
             today = db.execute("SELECT COUNT(*) FROM jobs WHERE submitted>=?", (int(time.time() // 86400) * 86400,)).fetchone()[0]
             states = dict(db.execute("SELECT state,COUNT(*) FROM jobs GROUP BY state").fetchall())
         return {"pending": pending, "submitted_today": today, "states": states}
+
+    def revoke_session(self, jti, expires):
+        with self.connect() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS revoked_sessions(jti TEXT PRIMARY KEY, expires INTEGER NOT NULL)")
+            db.execute("DELETE FROM revoked_sessions WHERE expires<?", (int(time.time()),))
+            db.execute("INSERT OR REPLACE INTO revoked_sessions VALUES(?,?)", (jti, expires))
+
+    def session_revoked(self, jti):
+        if not jti:
+            return False
+        with self.connect() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revoked_sessions'").fetchone():
+                return False
+            return db.execute("SELECT 1 FROM revoked_sessions WHERE jti=?", (jti,)).fetchone() is not None
 
     def rate_allowed(self, key, limit):
         window = int(time.time() // 60)
@@ -237,5 +339,12 @@ class DurableStore(TrialStore):
         if destination.exists():
             raise ValueError("Backup destination must not exist")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as source, sqlite3.connect(destination) as target:
-            source.backup(target)
+        target = sqlite3.connect(destination)
+        try:
+            with self.connect() as source:
+                source.backup(target)
+        finally:
+            # sqlite3's context manager only commits; the connection must be closed explicitly.
+            target.close()
+        with destination.open("rb") as stream:
+            os.fsync(stream.fileno())

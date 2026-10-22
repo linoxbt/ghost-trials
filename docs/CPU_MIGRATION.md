@@ -55,7 +55,7 @@ GHOST_CUSTOMER_AUTH_REQUIRED=true
 GHOST_AUTH_PROVIDER=privy
 PRIVY_APP_ID=<your Privy public app ID>
 GHOST_COOKIE_SECURE=true
-GHOST_ALLOWED_ORIGINS=https://ghost-trials.netlify.app,https://<backend-domain>
+GHOST_ALLOWED_ORIGINS=https://ghosttrials.site,https://ghost-trials.netlify.app,https://<backend-domain>
 GHOST_DATA_PATH=/data/state.sqlite3
 GHOST_ARTIFACT_ROOT=/data/artifacts
 RAILWAY_RUN_UID=0
@@ -69,7 +69,13 @@ sign-in, secure cookies, or exact HTTPS origins are missing. Railway volumes
 are initially root-owned: set `RAILWAY_RUN_UID=0` for the service. The container
 entrypoint assigns its dedicated `/data` mount, then runs FastAPI as UID 10001.
 Keep exactly one replica because the state store uses SQLite and an exclusive
-process lease. Back up the volume off-host.
+process lease. Back up the volume off-host. The API refuses to start on Railway
+unless `GHOST_DATA_PATH` and `GHOST_ARTIFACT_ROOT` are under the attached
+volume's `RAILWAY_VOLUME_MOUNT_PATH`, so a detached volume cannot silently lose
+data. Set `GHOST_TRUSTED_PROXY_HOPS` to the number of proxies that append
+`X-Forwarded-For` (verify against a request log before relying on per-client
+sign-in limits); per-workspace caps are `GHOST_MAX_ORG_PENDING_JOBS` and
+`GHOST_MAX_ORG_JOBS_PER_DAY`.
 
 Keep the Netlify production build variable `GHOST_BACKEND_ORIGIN` pointed at
 the stable Railway origin and redeploy the frontend when static assets change.

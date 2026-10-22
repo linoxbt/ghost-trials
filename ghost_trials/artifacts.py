@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -48,8 +49,18 @@ class EvidenceRepository:
             raise ValueError("Evidence exceeds storage bounds")
         directory = self.settings.ghost_artifact_root / "trials" / trial.trial_id
         directory.mkdir(parents=True, exist_ok=False)
+        try:
+            return await self._capture_into(directory, trial, scenario, result, manifest)
+        except BaseException:
+            # A partial bundle is never evidence and would block a later capture for this trial.
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
+    async def _capture_into(self, directory, trial, scenario, result, manifest):
         replicas = {}
-        async with httpx.AsyncClient(timeout=120, follow_redirects=False, transport=self.transport) as client:
+        # httpx timeouts are per read; the overall bound stops a trickling worker from holding capture open.
+        async with asyncio.timeout(self.settings.isaac_job_timeout_seconds), \
+                httpx.AsyncClient(timeout=120, follow_redirects=False, transport=self.transport) as client:
             for name, record in manifest.items():
                 url = result.get("artifact_urls", {}).get(name)
                 if not url or origin(url) != origin(self.settings.isaac_job_endpoint):
@@ -72,7 +83,7 @@ class EvidenceRepository:
         (directory / "result.json").write_text(json.dumps({"metrics": metrics, "artifacts": manifest}))
         (directory / "scenario.json").write_text(scenario.model_dump_json())
         from .independent_validation import verify_bundle
-        verification = verify_bundle(directory, self.settings.gr00t_checkpoint_digest)
+        verification = await asyncio.to_thread(verify_bundle, directory, self.settings.gr00t_checkpoint_digest)
         from .release_gate import decode_video
         await asyncio.to_thread(decode_video, directory / "simulation.mp4")
         verification["video_decoded"] = True

@@ -42,8 +42,10 @@ class Accounts:
         self.store, self.settings = store, settings
         self.jwks = None
         self.jwks_until = 0
+        self.jwks_fetched_at = 0
         self.dynamic_jwks = None
         self.dynamic_jwks_until = 0
+        self.dynamic_jwks_fetched_at = 0
         self.login_configuration = {"methods": [], "passkey_signup_enabled": False, "verified": False}
         self.login_configuration_until = 0
 
@@ -76,7 +78,9 @@ class Accounts:
             header = jwt.get_unverified_header(token)
             if header.get("alg") != "ES256" or not isinstance(header.get("kid"), str):
                 raise ValueError()
-            if self.jwks_until < time.time():
+            known = any(key.get("kid") == header["kid"] for key in self.jwks or [])
+            # Refetch on expiry, or on an unseen key ID (provider rotation) at most every 30 seconds.
+            if self.jwks_until < time.time() or (not known and self.jwks_fetched_at + 30 < time.time()):
                 # Fixed issuer URL, never a URL supplied by an untrusted JWT.
                 app_id = self.settings.privy_app_id
                 if not app_id or not app_id.isalnum():
@@ -86,6 +90,7 @@ class Accounts:
                     response.raise_for_status()
                     self.jwks = response.json()["keys"]
                     self.jwks_until = time.time() + 300
+                    self.jwks_fetched_at = time.time()
             for key in self.jwks or []:
                 if key.get("kid") == header["kid"] and key.get("alg") == "ES256" and key.get("crv") == "P-256":
                     return jwt.PyJWK.from_dict(key, algorithm="ES256").key
@@ -102,7 +107,8 @@ class Accounts:
             header = jwt.get_unverified_header(token)
             if header.get("alg") != "RS256" or not isinstance(header.get("kid"), str):
                 raise ValueError()
-            if self.dynamic_jwks_until < time.time():
+            known = any(key.get("kid") == header["kid"] for key in self.dynamic_jwks or [])
+            if self.dynamic_jwks_until < time.time() or (not known and self.dynamic_jwks_fetched_at + 30 < time.time()):
                 # Fixed provider URL; neither the token nor request controls the key source.
                 url = f"https://app.dynamic.xyz/api/v0/sdk/{environment_id}/.well-known/jwks"
                 async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
@@ -113,6 +119,7 @@ class Accounts:
                     raise ValueError()
                 self.dynamic_jwks = keys
                 self.dynamic_jwks_until = time.time() + 300
+                self.dynamic_jwks_fetched_at = time.time()
             for key in self.dynamic_jwks or []:
                 if key.get("kid") == header["kid"] and key.get("kty") == "RSA" and key.get("alg") in (None, "RS256"):
                     return jwt.PyJWK.from_dict(key, algorithm="RS256").key
@@ -123,6 +130,10 @@ class Accounts:
             raise HTTPException(503, "Identity provider verification temporarily unavailable")
 
     def schema(self, db):
+        # Create account tables once per database file, not on every authenticated request.
+        path = getattr(self.store, "database_path", None)
+        if path is not None and getattr(self, "_schema_path", None) == path:
+            return
         db.executescript("""
             CREATE TABLE IF NOT EXISTS users(subject TEXT PRIMARY KEY,display_name TEXT NOT NULL,created REAL NOT NULL,disabled INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS organizations(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner TEXT NOT NULL,created REAL NOT NULL);
@@ -132,6 +143,7 @@ class Accounts:
             CREATE TABLE IF NOT EXISTS budgets(id TEXT PRIMARY KEY,limit_cents INTEGER NOT NULL,used_cents INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS account_audit(sequence INTEGER PRIMARY KEY AUTOINCREMENT,at REAL,organization_id TEXT,subject TEXT,role TEXT,action TEXT,target TEXT);
         """)
+        self._schema_path = path
 
     def verify(self, token, key=None):
         if not self.settings.privy_app_id or not (key or self.settings.privy_verification_key):

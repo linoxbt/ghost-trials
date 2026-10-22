@@ -25,7 +25,21 @@ storage = ["boto3>=1.40,<2"]
 dev = [
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
+  "ruff>=0.6,<1",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 160
+extend-exclude = ["video", "netlify-dist", "node_modules"]
+
+[tool.ruff.lint]
+# Correctness-focused: undefined names, unused imports/variables, syntax errors.
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest injects fixtures by parameter name, which pyflakes reads as redefinitions.
+"tests/*" = ["F811"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

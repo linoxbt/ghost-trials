@@ -55,7 +55,7 @@ class CpuNemotronReviewer:
                     "seed": scenario.seed, "recipe": scenario.execution_recipe,
                     "checkpoint_digest": trial.metrics.policy_checkpoint_digest,
                     "simulator_version": trial.metrics.simulator_version,
-                    "verification_status": trial.evidence_verification.get("status"),
+                    "verification_status": (trial.evidence_verification or {}).get("status"),
                     "artifact_manifest": trial.metrics.artifact_manifest,
                     "measurements": values, "target_band_x_m": [0.64, 0.86],
                     "deterministic_outcome": "pass" if metrics["task_completed"] else "fail"}

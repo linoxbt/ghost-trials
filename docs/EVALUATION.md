@@ -1,5 +1,7 @@
 # Evaluation methodology and submission readiness
 
+> **Scope note (22 October 2026):** this page describes the GPU/Cosmos evaluation path (`warehouse-evaluation-v3` rubric). The demonstrated CPU MuJoCo path uses the measured target-band rubric described in [CPU_MIGRATION.md](CPU_MIGRATION.md) and [HUNT.md](HUNT.md).
+
 ## Product scope
 
 Ghost Trials helps a robotics evaluation engineer inspect policy failures in simulation. It is not a certification authority. Generated Cosmos footage illustrates a scenario; simulator measurements describe the executed physical trial. Do not imply that pixels are converted into exact simulator state or prove physical correctness.

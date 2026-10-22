@@ -61,9 +61,9 @@ const base = origin.replace(/\/$/,'')+'/app';
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button',{name:'Toggle navigation'}).getAttribute('aria-expanded'),'false');
   assert.equal(await page.locator('#menuButton').evaluate(el=>el===document.activeElement),true);
-  for(const [path,name] of [['overview','Ghost Trials'],['hunt','Release the Ghost'],['failures','Failure library'],['trials','Trial runs'],['scenarios','Scenario library'],['reports','Reports & evidence'],['system','System'],['new','Create a trial']]){
+  for(const [path,name] of [['overview','Ghost Trials'],['hunt','Release the Ghost'],['failures','Failure library'],['trials','Trial runs'],['scenarios','Scenario library'],['reports','Reports & evidence'],['account','Account'],['new','Create a trial']]){
     await page.goto(base+'/#/'+path);
-    await page.getByRole('heading',{name,exact:path==='overview'||path==='trials'||path==='system'}).waitFor();
+    await page.getByRole('heading',{name,exact:path==='overview'||path==='trials'||path==='account'}).waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,`${path}: horizontal page overflow`);
     if(['overview','trials','scenarios','reports'].includes(path)){
       for(const record of await page.locator('.data-table tbody tr').all()){

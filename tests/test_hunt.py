@@ -176,3 +176,79 @@ def test_verified_ghost_case_preserves_exact_replay_inputs():
     assert case.seed == 17 and case.execution_recipe == s.execution_recipe
     assert case.policy.checkpoint_digest == "sha256:test"
     assert case.artifact_manifest == {"video": "abc"}
+
+
+def cpu_hunt(budget=30, strategy="adaptive"):
+    h = hunt(space=default_space("object_positioning", "mujoco_cpu"), budget=budget)
+    h.strategy = strategy
+    return h
+
+
+def run_oracle(h, fails):
+    """Drive the planner against a deterministic oracle; candidates carry validated-evidence labels."""
+    while (c := HuntPlanner(h).next()) is not None:
+        c.trial_id = f"trl_{c.sequence}"
+        c.outcome = "failure" if fails(c.controls) else "pass"
+        c.evidence_class, c.simulator_version = "artifact_validated_simulation", "MuJoCo test"
+        h.candidates.append(c)
+    return h
+
+
+def test_boundary_reports_narrowest_observed_bracket():
+    from ghost_trials.hunt import empirical_boundary
+    h = run_oracle(cpu_hunt(), lambda c: c["object_mass_kg"] > 0.30)
+    boundary = empirical_boundary(h)
+    assert boundary and boundary.dimension == "object_mass_kg"
+    assert boundary.pass_value <= 0.30 < boundary.fail_value
+    # Bisection narrows the bracket well below the full mass range.
+    assert boundary.fail_value - boundary.pass_value < 0.2
+    reproductions = sum(c.phase == "reproduce" for c in h.candidates)
+    assert reproductions <= max(2, h.max_trials // 4)
+    assert not any(c.phase == "reproduce" and any(b.phase == "boundary" and b.controls == c.controls for b in h.candidates)
+                   for c in h.candidates)
+
+
+def test_grid_starts_at_defaults_uses_one_seed_and_never_repeats():
+    h = run_oracle(cpu_hunt(budget=12, strategy="grid"), lambda c: False)
+    defaults = {d.name: d.default for d in h.search_space.dimensions}
+    assert h.candidates[0].controls == defaults
+    assert len({c.seed for c in h.candidates}) == 1
+    keys = [tuple(sorted(c.controls.items())) for c in h.candidates]
+    assert len(keys) == len(set(keys))
+
+
+def test_grid_can_establish_boundary_with_shared_seed():
+    from ghost_trials.hunt import empirical_boundary
+    h = run_oracle(cpu_hunt(budget=12, strategy="grid"), lambda c: c["object_mass_kg"] > 0.6)
+    assert empirical_boundary(h) is not None
+
+
+def test_cpu_near_miss_counts_as_task_success_for_regression():
+    metrics = TrialMetrics(time_to_react_ms=None, min_clearance_m=None, task_completed=True, fall_or_collision=False,
+                           evidence_origin="synthetic", robot_metrics={"object_final_x_m": 0.645})
+    trial = Trial(trial_id="trl_near", scenario_id="scn_test", status=TrialStatus.DONE, metrics=metrics)
+    assert observed_outcome(trial, allow_synthetic_fixture=True)[0] == "near_failure"
+    from ghost_trials.hunt import PASSING_OUTCOMES
+    assert "near_failure" in PASSING_OUTCOMES
+
+
+def test_each_case_gets_the_bracket_on_its_own_line():
+    from ghost_trials.hunt import empirical_boundary
+    h = run_oracle(cpu_hunt(budget=12, strategy="grid"),
+                   lambda c: c["object_position_x_m"] < 0.36 or c["surface_friction"] > 1.0)
+    position_fail = next(c for c in h.candidates if c.outcome == "failure" and c.controls["object_position_x_m"] < 0.36
+                         and c.controls["surface_friction"] <= 1.0)
+    friction_fail = next(c for c in h.candidates if c.outcome == "failure" and c.controls["surface_friction"] > 1.0
+                         and c.controls["object_position_x_m"] >= 0.36)
+    assert empirical_boundary(h, anchor=position_fail).dimension == "object_position_x_m"
+    assert empirical_boundary(h, anchor=friction_fail).dimension == "surface_friction"
+
+
+def test_legacy_grid_hunt_keeps_its_original_order():
+    h = cpu_hunt(budget=9, strategy="grid")
+    legacy = TrialCandidate(sequence=1, phase="explore", seed=123,
+                            controls={d.name: d.minimum for d in h.search_space.dimensions})
+    h.candidates.append(legacy)
+    second = HuntPlanner(h).next()
+    dims = h.search_space.dimensions
+    assert second.controls[dims[0].name] == dims[0].default

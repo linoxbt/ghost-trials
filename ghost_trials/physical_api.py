@@ -6,7 +6,6 @@ import re
 import shutil
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -16,9 +15,24 @@ from .models import LiveEvent, Scenario, StructuredDescription, Trial, TrialStat
 from .physical import FILES, FileManifest, RecordingSetup, file_digest, verify_recording
 
 
+def append_chunk(path, data):
+    with path.open("ab" if path.exists() else "xb") as stream:
+        os.chmod(path, 0o600)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
 def build_router(settings, store, access, publish, submission_allowed):
     router = APIRouter(prefix="/physical", tags=["Physical recordings (read-only hardware)"])
-    lock = asyncio.Lock()
+    lock = asyncio.Lock()  # session creation and per-organization session limits
+    session_locks: dict[str, asyncio.Lock] = {}
+
+    def session_lock(session_id: str) -> asyncio.Lock:
+        # One recording's chunked upload or validation never blocks another organization's uploads.
+        if not re.fullmatch(r"phy_[a-f0-9]{24}", session_id):
+            raise HTTPException(404, "Recording session not found")
+        return session_locks.setdefault(session_id, asyncio.Lock())
 
     def principal(request, write=False):
         if write and not access.enabled:
@@ -101,7 +115,7 @@ def build_router(settings, store, access, publish, submission_allowed):
     async def setup(session_id: str, body: RecordingSetup, request: Request):
         principal(request, True)
         check_mutation()
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             if session["status"] != "awaiting_capture":
                 raise HTTPException(409, "Uploaded recording identity is immutable")
@@ -112,7 +126,7 @@ def build_router(settings, store, access, publish, submission_allowed):
     @router.post("/sessions/{session_id}/cancel")
     async def cancel(session_id: str, request: Request):
         principal(request, True)
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             if session["status"] not in {"awaiting_capture", "uploading"}:
                 raise HTTPException(409, "Only a pending recording can be cancelled")
@@ -128,7 +142,7 @@ def build_router(settings, store, access, publish, submission_allowed):
             raise HTTPException(422, "Invalid file set or recording exceeds bundle limit")
         if body["capture.json"].bytes > 16384 or body["telemetry.jsonl"].bytes > 33554432:
             raise HTTPException(422, "Recording metadata or telemetry exceeds limits")
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             wanted = {k: v.model_dump() for k, v in body.items()}
             if session["manifest"] == wanted:
@@ -153,7 +167,7 @@ def build_router(settings, store, access, publish, submission_allowed):
         data = await request.body()
         if not 0 < len(data) <= 262144 or end-start+1 != len(data) or start > end or end >= total:
             raise HTTPException(422, "Invalid upload chunk")
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             record = session["manifest"].get(name)
             if session["status"] != "uploading" or not record or total != record["bytes"]:
@@ -172,11 +186,7 @@ def build_router(settings, store, access, publish, submission_allowed):
             else:
                 if shutil.disk_usage(directory(session_id)).free-len(data) < settings.ghost_physical_disk_reserve_bytes:
                     raise HTTPException(507, "Recording storage reserve reached")
-                with path.open("ab" if path.exists() else "xb") as stream:
-                    os.chmod(path, 0o600)
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(stream.fileno())
+                await asyncio.to_thread(append_chunk, path, data)
                 size += len(data)
             session["uploads"][name] = {"received_bytes": size, "complete": size == total,
                 "sha256_matches": size == total and await asyncio.to_thread(file_digest, path) == record["sha256"]}
@@ -187,7 +197,7 @@ def build_router(settings, store, access, publish, submission_allowed):
     async def validate(session_id: str, request: Request):
         principal(request, True)
         check_mutation()
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             if session["status"] == "validated":
                 return session
@@ -234,7 +244,7 @@ def build_router(settings, store, access, publish, submission_allowed):
     async def judge(session_id: str, request: Request):
         owner = principal(request, True)
         check_mutation()
-        async with lock:
+        async with session_lock(session_id):
             session = load(session_id, request, True)
             if session["status"] != "validated":
                 raise HTTPException(409, "Validate the recording first")

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from test_accounts import identities, signin
+from test_accounts import identities, signin  # noqa: F401 (identities is a pytest fixture)
 from ghost_trials.models import JudgeResult, TrialStatus
 from ghost_trials.physical import CaptureMetadata, FILES, RecordingSetup, VERSION, verify_recording
 from workers.physical.capture_g1 import G1Observer

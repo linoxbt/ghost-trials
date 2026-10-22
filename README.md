@@ -9,15 +9,13 @@ The [audit remediation record](docs/AUDIT_REMEDIATION.md) covers the code-level 
 
 The CPU task uses a two-axis gantry arm to position a free block on a tabletop. MuJoCo advances articulation, contacts, gravity and friction; the controller runs at every physics step. The Hunt varies actual model/controller parameters, adapts to measured outcomes, retains trace-derived evidence, and can reproduce or regress a failure. A separately gated NVIDIA Nemotron review through Nebius Token Factory can interpret every verified CPU trial; model failure never changes the measured outcome. NVIDIA/Nebius services are not dependencies of CPU physics. The legacy `local` adapter remains synthetic and is development-only.
 
-## Hosted release status (20 October 2026)
+## Hosted release status (checked 22 October 2026)
 
-The existing Railway production backend was updated from this local checkout. Deployment `2d0dd1f8-879e-4cd7-9448-6041089b834f` reached `SUCCESS`; [its live health response](https://ghost-trials-production.up.railway.app/health) reported `api_contract: multidomain-v1`, `execution_backend: mujoco_cpu`, and `simulator_provider: mujoco_cpu`. An unauthenticated request to the protected `/agent-trials` backend route returned `401`, confirming the route exists and remains access-controlled. This is a deployment/health check, **not** a signed-in end-to-end production Hunt or a new live Nemotron review.
-
-The Netlify frontend has **not** received the matching route and UI update: `https://ghost-trials.netlify.app/agent-trials` returned `404` at this snapshot. The pending frontend proxy change is in `scripts/build_netlify.py`. The current changes are also uncommitted on the local `agent-verification` branch, not published to GitHub `main`; a future GitHub-triggered Railway deployment could replace this CLI-uploaded backend. Treat the public site as a Physical AI preview until the frontend is released and a signed-in two-domain smoke test passes. The previously exposed Privy secret must be rotated in Privy and replaced in private backend configuration before claiming production readiness.
+The Railway backend's [live health response](https://ghost-trials-production.up.railway.app/health) reports `api_contract: multidomain-v1` with MuJoCo CPU execution. The Netlify site serves the same frontend files as `main`, and its `/agent-trials` proxy returns `401` without a session, confirming the protected two-domain route is reachable. These are deployment and route checks, **not** a signed-in end-to-end production Hunt or a new live Nemotron review; treat the hosted site as validated only after a signed-in two-domain smoke test passes. The previously exposed Privy secret must be rotated in Privy and replaced in private backend configuration before claiming production readiness.
 
 ## Hackathon submission
 
-The [Devpost submission draft](submission.md) describes both demonstrated local domains and the current partial hosted release. The [PDF dossier](submission.pdf) has not yet been regenerated to match this update. Personal details, numeric ratings, project-history confirmation, a signed-in production demo and the public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
+The [Devpost submission draft](submission.md) describes both demonstrated local domains and the current partial hosted release. Regenerate the [PDF dossier](submission.pdf) from `submission.md` (`scripts/render_submission.py`) before attaching it. Personal details, numeric ratings, project-history confirmation, a signed-in production demo and the public video URL still require owner completion. Earlier planning drafts remain under [docs/submission](docs/submission/README.md). None of these documents is a submitted entry or proof of eligibility.
 
 ## Quick start
 
@@ -64,7 +62,7 @@ The [Ghost Hunt guide](docs/HUNT.md) documents supported worker controls, search
 
 - Primary Hunt workflow: bounded adaptive/random/grid search, parameterized SONIC/Arena recipes, mutation, exact repeats, conditional empirical boundaries, persisted Ghost Cases, and compatible-checkpoint regression
 - First-class authenticated `/hunts` and `/ghost-cases` API with organization isolation and paid-job admission on every candidate
-- Hunt, Failures, Trials, Compare, and System workspace navigation; physical capture and manual tools remain under System → Advanced
+- Hunt, Failures, Trials, and Compare workspace navigation; team, physical capture, benchmarks, reports and manual tools are under Account
 - A compact sign-in screen and an Account page for profile-name updates, workspace identity, sign-in settings, and sign-out; provider credentials and email remain with the identity provider
 - AI-agent Hunts execute only allowlisted bundled reference targets with parent-mediated mock tools, versioned deterministic assertions, retained tool traces, exact reference replay, and case-specific corrected-target regression; untrusted customer executables are blocked
 
@@ -74,7 +72,7 @@ The [Ghost Hunt guide](docs/HUNT.md) documents supported worker controls, search
 - Versioned experimental rubric with evidence-aware incident reports, not demonstrated causal certification
 - Optional Nebius Token Factory / Nemotron review: one gated Super call for an artifact-verified CPU trial or agent trace; the separate legacy GPU judge supports two-pass disagreement detection and Ultra escalation
 - Orange application interface with custom vector branding, collapsible sidebar, and accessible mobile hamburger navigation
-- Separate Overview, Trial Runs, Scenario Library, Create Trial, Reports, System, and flight-record views
+- Separate Overview, Trial Runs, Scenario Library, Create Trial, Reports, Account, and flight-record views
 - Searchable/filterable trial records, live progress, and JSON evidence exports
 - Compare runs with setup compatibility checks, metric deltas, and linked recording controls
 - Evidence inspector with recorded incident timestamps, provenance, artifact manifests, and original judge interpretations
@@ -182,7 +180,7 @@ Synthetic demo records, unverified measurements, legacy rubrics, proxy-only meas
 
 This is an experimental product metric, not a safety standard or a calibrated probability. Scoring uses `warehouse-evaluation-v3`; older records retain their original rubric and are not pooled with newer records. Falls/collisions and task completion are reported independently. Current proxy-based robot response measurements require review, not confident pass claims. Catastrophic causation is not established by the current runner contract.
 
-See [evaluation methodology and remaining validation](docs/EVALUATION.md), [free-credit steps](docs/FREE_CREDITS.md), and [execution handoff](docs/EXECUTION_HANDOFF.md).
+See [GPU-path evaluation methodology](docs/EVALUATION.md) (the CPU path is in [CPU_MIGRATION.md](docs/CPU_MIGRATION.md)), [free-credit steps](docs/FREE_CREDITS.md), and [execution handoff](docs/EXECUTION_HANDOFF.md).
 
 For pinned checkpoint access, the single-trial GPU acceptance command, reduced-traction support, and offline evidence verification, see [GPU acceptance and validation](docs/GPU_ACCEPTANCE.md). These tools do not provision a VM or turn a Token Factory API key into GPU access. Local CPU MuJoCo execution is real simulation; the optional G1/SONIC GPU path still requires its own acceptance run. The hosted Netlify preview is connected to a Railway CPU backend; verify its health and sign-in flow before presenting it as a working demo.
 
