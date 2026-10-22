@@ -60,3 +60,5 @@ main{padding:34px 36px 42px;width:100%;max-width:1600px;margin:0 auto;flex:1}.pa
 main,#content{min-width:0}.preview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.preview-grid>*,.panel{min-width:0}
 @media(max-width:620px){.preview-grid{grid-template-columns:minmax(0,1fr)}}
 .mono,.evidence-warnings li,.panel-foot{overflow-wrap:anywhere}
+/* On phones a label may wrap rather than force its container wider than the screen. */
+@media(max-width:620px){.button,.text-link{white-space:normal;min-width:0;max-width:100%;text-align:center}.comparison-controls>*{min-width:0}}

@@ -44,7 +44,11 @@ const origin=(process.env.GHOST_PREVIEW_URL||'http://127.0.0.1:8010').replace(/\
     // On failure, name the elements wider than the viewport so CI logs show the cause.
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth?null:{scrollWidth:document.documentElement.scrollWidth,
       offenders:[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>innerWidth+0.5).slice(-8)
-        .map(el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${el.className&&typeof el.className==='string'?'.'+el.className.trim().split(/\s+/).join('.'):''} right=${Math.round(el.getBoundingClientRect().right)} "${(el.textContent||'').trim().slice(0,30)}"`)});
+        .map(el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${el.className&&typeof el.className==='string'?'.'+el.className.trim().split(/\s+/).join('.'):''} right=${Math.round(el.getBoundingClientRect().right)} "${(el.textContent||'').trim().slice(0,30)}"`),
+      // Width of each ancestor of the widest element shows which container stretched.
+      chain:(()=>{let el=[...document.querySelectorAll('body *')].sort((a,b)=>b.getBoundingClientRect().right-a.getBoundingClientRect().right)[0],out=[];
+        while(el&&el!==document.body){const cs=getComputedStyle(el);out.push(`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}.${(typeof el.className==='string'?el.className:'').trim().split(/\s+/)[0]||''} w=${Math.round(el.getBoundingClientRect().width)} ${cs.display} ws=${cs.whiteSpace}`);el=el.parentElement;}return out;})(),
+      fonts:document.fonts?[...document.fonts].filter(f=>f.status==='loaded').map(f=>f.family).filter((f,i,a)=>a.indexOf(f)===i):[]});
     assert.equal(overflow,null,`${path} overflow at ${width}: ${JSON.stringify(overflow)}`);
    }
   }
