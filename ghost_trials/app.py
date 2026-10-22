@@ -6,6 +6,7 @@ import time
 import uuid
 import logging
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -16,10 +17,10 @@ from fastapi.staticfiles import StaticFiles
 
 from .adapters import DeterministicIsaacSimulator, ExecutionBlocked, LocalRubricJudge, LocalScenarioGenerator, NebiusNemotronJudge
 from .config import get_settings
-from .models import PipelineAccepted, SafetyScore, ScenarioCreate, ScoreCategory, TrialStatus, TrialView
+from .models import PipelineAccepted, SafetyScore, ScenarioCreate, TrialStatus, TrialView
 from .pipeline import CertificationPipeline
 from .production import CosmosScenarioGenerator, IsaacRemoteSimulator, ProductionConfigurationError
-from .durable import DurableStore
+from .durable import DurableStore, QuotaExceeded
 from .security import AccessControl
 from .jobs import JobRunner
 from .hunt import HuntObjective, SearchSpace, HuntStatus, compare_case_regression, failure_families, default_space
@@ -49,7 +50,16 @@ if settings.ghost_mode == "production":
 if settings.ghost_mode == "cpu" and (settings.ghost_scenario_provider, settings.ghost_simulator_provider,
                                      settings.ghost_judge_provider) != ("cpu", "mujoco_cpu", "cpu"):
     raise ProductionConfigurationError("CPU mode requires cpu/mujoco_cpu/cpu providers; no synthetic fallback")
+if os.environ.get("RAILWAY_ENVIRONMENT_ID") and settings.ghost_require_persistent_data:
+    # Without a mounted volume SQLite and evidence live on the ephemeral filesystem and vanish on redeploy.
+    mount = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+    if not mount or not all(Path(path).resolve().is_relative_to(Path(mount).resolve())
+                            for path in (settings.ghost_data_path, settings.ghost_artifact_root)):
+        raise ProductionConfigurationError(
+            "Railway deployment requires GHOST_DATA_PATH and GHOST_ARTIFACT_ROOT on the attached volume "
+            "(RAILWAY_VOLUME_MOUNT_PATH); set GHOST_REQUIRE_PERSISTENT_DATA=false only for disposable previews")
 store = DurableStore(settings.ghost_data_path)
+store.org_job_limits = (settings.ghost_max_org_pending_jobs, settings.ghost_max_org_jobs_per_day)
 access = AccessControl(settings, store)
 subscribers: set[WebSocket] = set()
 submission_lock = asyncio.Lock()
@@ -59,7 +69,8 @@ logger = logging.getLogger(__name__)
 
 async def publish(event) -> None:
     stale = []
-    for socket in subscribers:
+    # Snapshot: sockets connect and disconnect while each send awaits.
+    for socket in list(subscribers):
         try:
             principal = access.principal(socket)
             initial = getattr(socket.state, "principal", None)
@@ -70,7 +81,7 @@ async def publish(event) -> None:
             trial = store.trials.get(event.trial_id)
             if not trial or trial.organization_id != principal.organization_id:
                 continue
-            await socket.send_json(event.model_dump(mode="json"))
+            await asyncio.wait_for(socket.send_json(event.model_dump(mode="json")), timeout=5)
         except Exception:
             stale.append(socket)
     for socket in stale:
@@ -203,11 +214,13 @@ async def checked_trial(trial):
                                    settings.ghost_artifact_root)
 
 
-async def checked_tenant_trials(request):
-    semaphore = asyncio.Semaphore(2)
+# Shared across requests so concurrent list calls cannot fill the default thread pool.
+evidence_check_slots = asyncio.Semaphore(4)
 
+
+async def checked_tenant_trials(request):
     async def bounded_check(trial):
-        async with semaphore:
+        async with evidence_check_slots:
             return await checked_trial(trial)
 
     return await asyncio.gather(*(bounded_check(trial) for trial in tenant_trials(request)))
@@ -264,7 +277,7 @@ async def privy_session(body: PrivySessionRequest, request: Request):
         raise HTTPException(404, "Privy sign-in is not active")
     if not access.origin_allowed(request):
         raise HTTPException(403, "Untrusted request origin")
-    if not store.rate_allowed("privy_login", 30):
+    if not access.auth_attempt_allowed(request, "privy_login"):
         raise HTTPException(429, "Too many sign-in attempts")
     key = await access.accounts.verification_key(body.access_token)
     claims = access.accounts.verify(body.access_token, key)
@@ -282,7 +295,7 @@ async def dynamic_session(body: PrivySessionRequest, request: Request):
         raise HTTPException(404, "Dynamic sign-in is not active")
     if not access.origin_allowed(request):
         raise HTTPException(403, "Untrusted request origin")
-    if not store.rate_allowed("dynamic_login", 30):
+    if not access.auth_attempt_allowed(request, "dynamic_login"):
         raise HTTPException(429, "Too many sign-in attempts")
     key = await access.accounts.dynamic_verification_key(body.access_token)
     claims = access.accounts.verify_dynamic(body.access_token, key)
@@ -386,7 +399,11 @@ async def request_log(request: Request, call_next):
 @app.get("/auth/login", response_class=HTMLResponse)
 @app.get("/auth/invite", response_class=HTMLResponse)
 async def login_page():
-    return (ROOT / "static" / "login.html").read_text()
+    page = (ROOT / "static" / "login.html").read_text()
+    if access.tokens:
+        # Token sign-in must work even if the JavaScript sign-in bundle fails to load.
+        page = page.replace('<details id="private-team" hidden>', '<details id="private-team">', 1)
+    return page
 
 
 @app.post("/auth/session")
@@ -395,8 +412,8 @@ async def login(request: Request):
         return RedirectResponse("/app/", status_code=303)
     if not access.origin_allowed(request):
         raise HTTPException(403, "Untrusted request origin")
-    # Global login budget cannot be bypassed by forged proxy/IP headers.
-    if not store.rate_allowed("login", 10):
+    # Per-client limit; the platform backstop still holds if forwarded addresses are forged.
+    if not access.auth_attempt_allowed(request, "login"):
         raise HTTPException(429, "Too many login attempts")
     from urllib.parse import parse_qs
     try:
@@ -431,6 +448,8 @@ async def identity(request: Request):
 async def logout(request: Request):
     principal = current_principal(request)
     access.accounts.revoke(request.cookies.get("ghost_session", ""))
+    if access.tokens:
+        access.revoke_role_session(request.cookies.get("ghost_session", ""))
     access.accounts.audit(principal, "account_logout")
     response = JSONResponse({"status": "signed_out"})
     response.delete_cookie("ghost_session", path="/")
@@ -460,20 +479,30 @@ def local_agent_allowed():
         raise HTTPException(429, "Job quota exceeded")
 
 
+def agent_execution_allowed(organization_id: str):
+    """Daily caps for bundled agent executions; raises QuotaExceeded."""
+    if store.job_counts()["submitted_today"] + store.agent_reservations_today() >= settings.ghost_max_jobs_per_day:
+        raise QuotaExceeded("Daily execution budget exhausted")
+    if store.agent_reservations_today(organization_id) >= settings.ghost_max_org_jobs_per_day:
+        raise QuotaExceeded("This workspace has used its daily agent-trial allowance")
+
+
 def reserve_agent_execution(trial_id: str, organization_id: str):
     """Admission for local agent replay/regression; called under submission_lock."""
     local_agent_allowed()
-    today = int(time.time() // 86400)
-    used = sum(int(json.loads(raw)["at"] // 86400) == today
-               for raw in store.list_domain("agent_reservation"))
-    if store.job_counts()["submitted_today"] + used >= settings.ghost_max_jobs_per_day:
-        raise HTTPException(429, "Daily execution budget exhausted")
+    agent_execution_allowed(organization_id)
     store.put_domain("agent_reservation", trial_id, json.dumps({
         "organization_id": organization_id, "at": time.time()}))
 
 
 hunt_service.admission = submission_allowed
 hunt_service.agent_admission = local_agent_allowed
+hunt_service.agent_execution_allowed = agent_execution_allowed
+
+
+@app.exception_handler(QuotaExceeded)
+async def quota_exceeded(request: Request, exc: QuotaExceeded):
+    return JSONResponse({"detail": str(exc)}, 429, headers={"Retry-After": "3600"})
 
 
 def prior_submission(request: Request, payload):
@@ -491,7 +520,31 @@ def prior_submission(request: Request, payload):
     return key, digest, None
 
 
-@app.get("/health")
+def remembered_request(request: Request, scope: str, payload):
+    """Idempotency for non-trial creations: return (record_id, digest, earlier_result_id | None)."""
+    key = request.headers.get("idempotency-key")
+    if not key:
+        return None, None, None
+    if len(key) > 128 or not key.isascii():
+        raise HTTPException(400, "Invalid Idempotency-Key")
+    record_id = f"{current_principal(request).organization_id}:{scope}:{key}"
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    raw = store.get_domain("idempotency", record_id)
+    if raw:
+        earlier = json.loads(raw)
+        if earlier["request_hash"] != digest:
+            raise HTTPException(409, "Idempotency key already used for another request")
+        return record_id, digest, earlier["result_id"]
+    return record_id, digest, None
+
+
+def remember_request(record_id, digest, result_id):
+    if record_id:
+        store.put_domain("idempotency", record_id, json.dumps({"request_hash": digest, "result_id": result_id,
+                                                               "at": time.time()}))
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     if not runner.task or runner.task.done():
         raise HTTPException(503, "API worker not ready")
@@ -587,7 +640,7 @@ async def capabilities():
 
 @app.post("/scenarios", response_model=PipelineAccepted, status_code=202)
 async def create_scenario(request: ScenarioCreate, http_request: Request):
-    role = access.require(http_request, ("admin", "operator"))
+    access.require(http_request, ("admin", "operator"))
     async with submission_lock:
         key, digest, prior = prior_submission(http_request, {"create": request.model_dump(mode="json")})
         if prior:
@@ -626,7 +679,15 @@ async def create_hunt(body: HuntCreate, request: Request):
     access.require(request, ("admin", "operator"))
     principal = current_principal(request)
     async with submission_lock:
+        record_id, digest, earlier = remembered_request(request, "hunt", body.model_dump(mode="json"))
+        if earlier:
+            return owned_hunt(request, earlier)
         (local_agent_allowed if body.domain == "ai_agent" else submission_allowed)()
+        if body.domain != "ai_agent":
+            remaining = settings.ghost_max_org_jobs_per_day - store.org_usage(principal.organization_id)[1]
+            if body.max_trials > remaining:
+                raise QuotaExceeded(f"This workspace can run {max(0, remaining)} more trials today; "
+                                    "reduce the Hunt size or try again tomorrow")
         try:
             if body.domain == "ai_agent":
                 if not isinstance(body.objective, AgentHuntObjective) or (body.search_space is not None and not isinstance(body.search_space, AgentSearchSpace)):
@@ -643,6 +704,7 @@ async def create_hunt(body: HuntCreate, request: Request):
             raise HTTPException(503, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        remember_request(record_id, digest, hunt.hunt_id)
         access.accounts.audit(principal, "hunt_created", hunt.hunt_id)
         hunt_service.launch(hunt.hunt_id, principal.subject)
     return hunt
@@ -664,8 +726,8 @@ async def get_hunt(hunt_id: str, request: Request):
 async def resume_hunt(hunt_id: str, request: Request):
     access.require(request, ("admin", "operator"))
     hunt = owned_hunt(request, hunt_id)
-    if hunt.status not in {HuntStatus.INTERRUPTED, HuntStatus.BLOCKED}:
-        raise HTTPException(409, "Only interrupted or blocked Hunts can be resumed")
+    if hunt.status not in {HuntStatus.INTERRUPTED, HuntStatus.BLOCKED} or hunt_service.is_running(hunt_id):
+        raise HTTPException(409, "Only interrupted or blocked Hunts that are not running can be resumed")
     configured_digest = (hunt.target.version if isinstance(hunt, AgentHunt) else
                          "synthetic-development-fixture" if settings.ghost_simulator_provider == "local"
                          else hunt.policy.checkpoint_digest if settings.ghost_simulator_provider == "mujoco_cpu"
@@ -687,13 +749,13 @@ async def resume_hunt(hunt_id: str, request: Request):
 
 @app.get("/ghost-cases")
 async def list_ghost_cases(request: Request):
-    return hunt_service.cases(current_principal(request).organization_id)
+    return await asyncio.to_thread(hunt_service.cases, current_principal(request).organization_id)
 
 
 @app.get("/failure-families")
 async def list_failure_families(request: Request):
-    return failure_families([case for case in hunt_service.cases(current_principal(request).organization_id)
-                             if not isinstance(case, AgentGhostCase)])
+    cases = await asyncio.to_thread(hunt_service.cases, current_principal(request).organization_id)
+    return failure_families([case for case in cases if not isinstance(case, AgentGhostCase)])
 
 
 def owned_case(request: Request, case_id: str):
@@ -806,7 +868,7 @@ async def replay_agent_trial(trial_id: str, request: Request):
         replay = await asyncio.to_thread(execute_reference, original.target, original.policy, original.scenario,
                                          hunt_id=original.hunt_id, trial_id=replay_id, objective=original.objective)
     store.put_domain("agent_trial", replay_id, replay.model_dump_json())
-    for case in hunt_service.cases(original.organization_id):
+    for case in hunt_service.stored_cases(original.organization_id):
         if isinstance(case, AgentGhostCase) and case.baseline_trial_id == original.trial_id:
             hunt_service.record_agent_reproduction(case, replay)
     access.accounts.audit(current_principal(request), "agent_trial_replayed", replay_id)
@@ -870,12 +932,24 @@ async def run_case_regression(case_id: str, request: Request, body: RegressionCr
             or settings.ghost_simulator_provider != "isaac_http"):
         raise HTTPException(409, "Configure a different compatible live checkpoint before regression")
     configured_backend = CPU_BACKEND if cpu else settings.ghost_execution_backend
-    if pipeline.embodiment != case.policy.embodiment or configured_backend != hunt_service.get(case.hunt_id).search_space.backend:
+    case_hunt = hunt_service.get(case.hunt_id)
+    if case_hunt is None:
+        raise HTTPException(409, "The Hunt that produced this Ghost Case is no longer available")
+    if pipeline.embodiment != case.policy.embodiment or configured_backend != case_hunt.search_space.backend:
         raise HTTPException(409, "Candidate embodiment or simulator backend is incompatible")
     baseline = store.trials.get(case.baseline_trial_id)
     if not baseline:
         raise HTTPException(409, "Baseline trial is missing")
     async with submission_lock:
+        candidate_name = candidate_controller.name if cpu else None
+        for raw in store.list_domain_for_org("regression", case.organization_id):
+            row = json.loads(raw)
+            pending = store.trials.get(row.get("trial_id"))
+            # A double-submitted regression returns the one already in flight.
+            if (row.get("case_id") == case_id and pending and pending.policy_name == (candidate_name or pending.policy_name)
+                    and pending.status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}):
+                return JSONResponse({"case_id": case_id, "candidate_trial_id": pending.trial_id, "status": "queued"},
+                                    status_code=202)
         submission_allowed()
         scenario, trial = await pipeline.replay(baseline, persist=False)
         if cpu:
@@ -895,7 +969,10 @@ def regression_view(case, candidate):
                 "outcome": "incompatible_or_unverified", "reason": "baseline_evidence_failed_current_verification"}
     if candidate.status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}:
         return {"case_id": case.case_id, "candidate_trial_id": candidate.trial_id, "status": candidate.status}
-    baseline = store.trials[case.baseline_trial_id]
+    baseline = store.trials.get(case.baseline_trial_id)
+    if baseline is None or baseline.scenario_id not in store.scenarios or candidate.scenario_id not in store.scenarios:
+        return {"case_id": case.case_id, "candidate_trial_id": candidate.trial_id,
+                "outcome": "incompatible_or_unverified", "reason": "baseline_or_candidate_record_missing"}
     return compare_case_regression(case, baseline, candidate,
                                    store.scenarios[baseline.scenario_id], store.scenarios[candidate.scenario_id])
 
@@ -921,7 +998,7 @@ def agent_regression_view(case: AgentGhostCase, candidate: AgentTrial):
 @app.get("/ghost-cases/{case_id}/regressions")
 async def list_case_regressions(case_id: str, request: Request):
     case = owned_case(request, case_id)
-    rows = [json.loads(raw) for raw in store.list_domain("regression")]
+    rows = [json.loads(raw) for raw in store.list_domain_for_org("regression", case.organization_id)]
     if isinstance(case, AgentGhostCase):
         return [agent_regression_view(case, trial) for row in rows
                 if row.get("domain") == "ai_agent" and row.get("case_id") == case_id
@@ -1019,7 +1096,7 @@ async def replay_trial(trial_id: str, request: Request):
             raise HTTPException(409, "Exact replay requires currently verified baseline evidence")
     if store.scenarios[original.scenario_id].structured_description.hazard_type == "pending_generation":
         raise HTTPException(409, "Scenario generation must finish before reusing a scenario")
-    role = access.require(request, ("admin", "operator"))
+    access.require(request, ("admin", "operator"))
     async with submission_lock:
         key, digest, prior = prior_submission(request, {"replay": trial_id})
         if prior:
@@ -1031,7 +1108,7 @@ async def replay_trial(trial_id: str, request: Request):
             (settings.ghost_scenario_provider, settings.ghost_simulator_provider, settings.ghost_judge_provider)) else 0
         store.submit(scenario, trial, key, digest, reservation_cents=reserve,
                      platform_limit=settings.ghost_platform_budget_cents, subject=principal.subject)
-        for case in hunt_service.cases(principal.organization_id):
+        for case in hunt_service.stored_cases(principal.organization_id):
             if not isinstance(case, AgentGhostCase) and case.baseline_trial_id == original.trial_id:
                 store.put_domain("case_replay", trial.trial_id, json.dumps({
                     "organization_id": principal.organization_id, "case_id": case.case_id,
@@ -1042,18 +1119,17 @@ async def replay_trial(trial_id: str, request: Request):
 
 @app.post("/trials/{trial_id}/cancel")
 async def cancel_trial(trial_id: str, request: Request):
-    role = access.require(request, ("admin", "operator"))
+    access.require(request, ("admin", "operator"))
     owned_trial(request, trial_id)
     async with submission_lock:
         job = store.job(trial_id)
         if not job:
             raise HTTPException(404, "Job not found")
-        if job["state"] != "queued":
+        if job["state"] != "queued" or not store.cancel_queued(trial_id):
             raise HTTPException(409, "Only queued jobs can be cancelled; active GPU jobs require worker-side intervention")
         trial = store.trials[trial_id]
         trial.status, trial.error = TrialStatus.ERROR, "Cancelled before execution"
         await store.put_trial(trial)
-        store.job_state(trial_id, "cancelled")
         access.accounts.audit(current_principal(request), "job_cancelled", trial_id)
     return {"status": "cancelled", "trial_id": trial_id}
 
@@ -1065,7 +1141,8 @@ async def operations(request: Request):
         healthy = db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     return {"database_ok": healthy, "runner_alive": bool(runner.task and not runner.task.done()),
             "active_trial": runner.active, "uptime_seconds": int(time.time() - started_at),
-            "jobs": store.job_counts(), "live_execution_enabled": settings.ghost_live_execution_enabled,
+            "jobs": store.job_counts(), "unreadable_records": getattr(store, "unreadable_records", []),
+            "live_execution_enabled": settings.ghost_live_execution_enabled,
             "submissions_paused": store.maintenance(),
             "limits": {"pending": settings.ghost_max_pending_jobs, "daily": settings.ghost_max_jobs_per_day},
             "scope": "organization_isolated_single_process", "monetary_cap_enforced": False,
@@ -1145,6 +1222,8 @@ async def live(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         subscribers.discard(websocket)
 
 
@@ -1154,7 +1233,6 @@ async def artifact_preview(scenario_id: str, request: Request):
     if not scenario or scenario.organization_id != current_principal(request).organization_id:
         raise HTTPException(404, "Scenario not found")
     title = html.escape(scenario.structured_description.hazard_type.replace("_", " ").upper())
-    prompt = html.escape(scenario.prompt)
     severity = scenario.severity_tag.value
     template = (ROOT / "static" / "preview.html").read_text()
     hazard = scenario.structured_description.hazard_type
@@ -1188,7 +1266,7 @@ async def generated_artifact(artifact_path: str, request: Request):
     return FileResponse(path, headers={"Cache-Control": "private, no-store"})
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def landing():
     return (ROOT / "static" / "landing.html").read_text()
 

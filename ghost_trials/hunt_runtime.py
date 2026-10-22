@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
+import logging
 import hashlib
 import json
 import uuid
@@ -36,11 +38,29 @@ EXECUTABLE_TASKS = {
 }
 
 
+
+class HuntStopped(ValueError):
+    """A Hunt stopped for an operational reason that is safe to show to its owner."""
+
+
+def stop_reason(exc, hunt_id):
+    """User-facing reason for known admission/operational stops; None hides internals."""
+    from fastapi import HTTPException
+    from .durable import QuotaExceeded
+    if isinstance(exc, HTTPException) and isinstance(exc.detail, str):
+        return exc.detail
+    if isinstance(exc, (QuotaExceeded, HuntStopped)):
+        return str(exc)
+    logging.getLogger(__name__).error("hunt_stopped hunt_id=%s error_type=%s\n%s", hunt_id, type(exc).__name__,
+                                      "".join(traceback.format_tb(exc.__traceback__)))
+    return None
+
 class HuntService:
     def __init__(self, store, pipeline, settings, admission, admission_lock, agent_admission=None):
         self.store, self.pipeline, self.settings = store, pipeline, settings
         self.admission, self.admission_lock = admission, admission_lock
         self.agent_admission = agent_admission or admission
+        self.agent_execution_allowed = self.default_agent_execution_allowed
         self.tasks: dict[str, asyncio.Task] = {}
         self.agent_slots = asyncio.Semaphore(2)
 
@@ -53,6 +73,57 @@ class HuntService:
     def list(self, organization_id: str) -> list[Hunt | AgentHunt]:
         return [(AgentHunt if json.loads(raw).get("domain") == "ai_agent" else Hunt).model_validate_json(raw)
                 for raw in self.store.list_domain_for_org("hunt", organization_id)]
+
+    def attach_boundary(self, hunt: Hunt):
+        """Attach to each case the narrowest observed bracket on a line through that case's own trial."""
+        by_trial = {c.trial_id: c for c in hunt.candidates if c.trial_id}
+        for case_id in hunt.case_ids:
+            case = self.stored_case(case_id)
+            baseline = by_trial.get(case.baseline_trial_id) if isinstance(case, GhostCase) else None
+            if baseline is None or case.boundary is not None:
+                continue
+            boundary = empirical_boundary(hunt, anchor=baseline)
+            if boundary:
+                case.boundary = boundary
+                self.store.put_domain("ghost_case", case_id, case.model_dump_json())
+
+    def default_agent_execution_allowed(self, organization_id):
+        if self.store.job_counts()["submitted_today"] + self.store.agent_reservations_today() >= self.settings.ghost_max_jobs_per_day:
+            raise HuntStopped("Daily execution budget exhausted")
+
+    def queue_full(self, organization_id) -> bool:
+        limits = getattr(self.store, "org_job_limits", None)
+        org_pending = self.store.org_usage(organization_id)[0] if limits else 0
+        return (self.store.job_counts()["pending"] >= self.settings.ghost_max_pending_jobs
+                or (limits is not None and org_pending >= limits[0]))
+
+    async def wait_for_queue_slot(self, organization_id):
+        while self.queue_full(organization_id):
+            await asyncio.sleep(1)
+
+    async def wait_for_trial(self, trial_id):
+        """Wait for a queued trial without hanging forever on a lost job or a stalled runner."""
+        terminal = {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}
+        started = None
+        while True:
+            trial = self.store.trials.get(trial_id)
+            if trial is None:
+                raise HuntStopped("Hunt trial record disappeared")
+            if trial.status in terminal:
+                return
+            job = self.store.job(trial_id)
+            state = job["state"] if job else None
+            if state in {"done", "error", "cancelled", "blocked"} or state is None:
+                await asyncio.sleep(.5)
+                trial = self.store.trials.get(trial_id)
+                if trial is not None and trial.status in terminal:
+                    return
+                raise HuntStopped(f"Hunt trial job ended as {state or 'missing'} without a final trial status")
+            if state == "running":
+                started = started or time.monotonic()
+                if time.monotonic() - started > self.settings.ghost_job_timeout_seconds + 120:
+                    raise HuntStopped("Hunt trial exceeded the job timeout")
+            await asyncio.sleep(.2)
 
     def save(self, hunt: Hunt | AgentHunt):
         from .models import utc_now
@@ -124,10 +195,20 @@ class HuntService:
         self.save(hunt)
         return hunt
 
-    def launch(self, hunt_id: str, subject: str):
+    def is_running(self, hunt_id: str) -> bool:
         active = self.tasks.get(hunt_id)
-        if active and not active.done():
+        return bool(active and not active.done())
+
+    def stored_cases(self, organization_id: str) -> list[GhostCase | AgentGhostCase]:
+        """Recorded cases without integrity re-checks; for lookups, not for reporting."""
+        return [(AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)
+                for raw in self.store.list_domain_for_org("ghost_case", organization_id)]
+
+    def launch(self, hunt_id: str, subject: str):
+        if self.is_running(hunt_id):
             raise ValueError("Hunt is already running")
+        # Finished tasks are not kept once replaced.
+        self.tasks = {key: task for key, task in self.tasks.items() if not task.done()}
         self.tasks[hunt_id] = asyncio.create_task(self.run(hunt_id, subject))
 
     async def stop(self):
@@ -169,38 +250,43 @@ class HuntService:
                 if prior:
                     candidate.trial_id = prior["id"]
                 if not candidate.trial_id:
-                    async with self.admission_lock:
-                        self.admission()
-                        if candidate.phase == "reproduce":
-                            baseline = next((c for c in hunt.candidates[:-1] if c.controls == candidate.controls
-                                             and c.seed == candidate.seed and c.trial_id), None)
-                            if baseline is None:
-                                raise ValueError("Reproduction source trial is missing")
-                            scenario, trial = await self.pipeline.replay(self.store.trials[baseline.trial_id], persist=False)
-                        else:
-                            scenario, trial = await self.pipeline.create(ScenarioCreate(
-                                prompt=HAZARD_PROMPTS[hunt.objective.hazard_type], seed=candidate.seed), persist=False)
-                            # This is only a pending placeholder, not a model-generated scene.
-                            # Pipeline verifies the actual generated hazard against this recipe.
-                            scenario.structured_description.hazard_type = hunt.objective.hazard_type
-                            if hunt.search_space.backend == "mujoco_cpu":
-                                from .cpu_robot import recipe
-                                scenario.execution_recipe = recipe(candidate.seed, candidate.controls)
+                    # A full queue is a reason to wait, not to stop the Hunt.
+                    while True:
+                        await self.wait_for_queue_slot(hunt.organization_id)
+                        async with self.admission_lock:
+                            if self.queue_full(hunt.organization_id):
+                                continue
+                            self.admission()
+                            if candidate.phase == "reproduce":
+                                baseline = next((c for c in hunt.candidates[:-1] if c.controls == candidate.controls
+                                                 and c.seed == candidate.seed and c.trial_id), None)
+                                if baseline is None:
+                                    raise ValueError("Reproduction source trial is missing")
+                                scenario, trial = await self.pipeline.replay(self.store.trials[baseline.trial_id], persist=False)
                             else:
-                                scenario.execution_recipe = parameterize_hazard(scenario.model_dump(mode="json"),
-                                                                                candidate.controls, hunt.search_space.backend).to_dict()
-                        trial.policy_name = hunt.policy.name
-                        scenario.organization_id = trial.organization_id = hunt.organization_id
-                        live = any(p not in {"local", "cpu", "mujoco_cpu"} for p in (self.settings.ghost_scenario_provider,
-                                   self.settings.ghost_simulator_provider, self.settings.ghost_judge_provider))
-                        reservation = self.settings.ghost_live_job_reservation_cents if live else 0
-                        digest = hashlib.sha256(f"{hunt.hunt_id}:{candidate.sequence}:{candidate.controls}:{candidate.seed}".encode()).hexdigest()
-                        self.store.submit(scenario, trial, key, digest, reservation_cents=reservation,
-                                          platform_limit=self.settings.ghost_platform_budget_cents, subject=subject)
-                        candidate.trial_id = trial.trial_id
-                        self.save(hunt)
-                while self.store.trials[candidate.trial_id].status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}:
-                    await asyncio.sleep(.2)
+                                scenario, trial = await self.pipeline.create(ScenarioCreate(
+                                    prompt=HAZARD_PROMPTS[hunt.objective.hazard_type], seed=candidate.seed), persist=False)
+                                # This is only a pending placeholder, not a model-generated scene.
+                                # Pipeline verifies the actual generated hazard against this recipe.
+                                scenario.structured_description.hazard_type = hunt.objective.hazard_type
+                                if hunt.search_space.backend == "mujoco_cpu":
+                                    from .cpu_robot import recipe
+                                    scenario.execution_recipe = recipe(candidate.seed, candidate.controls)
+                                else:
+                                    scenario.execution_recipe = parameterize_hazard(scenario.model_dump(mode="json"),
+                                                                                    candidate.controls, hunt.search_space.backend).to_dict()
+                            trial.policy_name = hunt.policy.name
+                            scenario.organization_id = trial.organization_id = hunt.organization_id
+                            live = any(p not in {"local", "cpu", "mujoco_cpu"} for p in (self.settings.ghost_scenario_provider,
+                                       self.settings.ghost_simulator_provider, self.settings.ghost_judge_provider))
+                            reservation = self.settings.ghost_live_job_reservation_cents if live else 0
+                            digest = hashlib.sha256(f"{hunt.hunt_id}:{candidate.sequence}:{candidate.controls}:{candidate.seed}".encode()).hexdigest()
+                            self.store.submit(scenario, trial, key, digest, reservation_cents=reservation,
+                                              platform_limit=self.settings.ghost_platform_budget_cents, subject=subject)
+                            candidate.trial_id = trial.trial_id
+                            self.save(hunt)
+                        break
+                await self.wait_for_trial(candidate.trial_id)
                 trial = self.store.trials[candidate.trial_id]
                 observed_trial = await asyncio.to_thread(reporting_trial, trial,
                     self.store.scenarios[trial.scenario_id], self.settings.ghost_artifact_root)
@@ -233,14 +319,9 @@ class HuntService:
                     self._update_reproduction(hunt, candidate)
                 self.save(hunt)
                 if hunt.status == HuntStatus.BLOCKED:
+                    self.attach_boundary(hunt)
                     return
-            boundary = empirical_boundary(hunt)
-            if boundary:
-                for case_id in hunt.case_ids:
-                    case = self.case(case_id)
-                    if case and case.boundary is None:
-                        case.boundary = boundary
-                        self.store.put_domain("ghost_case", case_id, case.model_dump_json())
+            self.attach_boundary(hunt)
             hunt.status = HuntStatus.COMPLETE
             self.save(hunt)
         except asyncio.CancelledError:
@@ -249,8 +330,17 @@ class HuntService:
             raise
         except Exception as exc:
             hunt.status = HuntStatus.BLOCKED
-            hunt.provider_errors.append(f"Hunt orchestration stopped ({type(exc).__name__}); review server logs and provider readiness")
+            reason = stop_reason(exc, hunt.hunt_id)
+            hunt.provider_errors.append(f"Hunt stopped: {reason}" if reason else
+                                        f"Hunt orchestration stopped ({type(exc).__name__}); review server logs and provider readiness")
             self.save(hunt)
+
+    def stored_case(self, case_id: str) -> GhostCase | AgentGhostCase | None:
+        """The case exactly as recorded, without derived verification views; use this before saving."""
+        raw = self.store.get_domain("ghost_case", case_id)
+        if not raw:
+            return None
+        return (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)
 
     def case(self, case_id: str) -> GhostCase | AgentGhostCase | None:
         raw = self.store.get_domain("ghost_case", case_id)
@@ -261,9 +351,12 @@ class HuntService:
 
     def cases(self, organization_id: str) -> list[GhostCase | AgentGhostCase]:
         replay_rows = [json.loads(raw) for raw in self.store.list_domain_for_org("case_replay", organization_id)]
-        trial_rows = list(self.store.trials.values())
+        replays_by_baseline: dict[str, list] = {}
+        for trial in list(self.store.trials.values()):
+            if trial.replay_of and trial.organization_id == organization_id:
+                replays_by_baseline.setdefault(trial.replay_of, []).append(trial)
         return [self._checked_agent_case(case) if isinstance(case, AgentGhostCase) else self._checked_physical_case(
-                    self._with_manual_replays(case, replay_rows, trial_rows))
+                    self._with_manual_replays(case, replay_rows, replays_by_baseline.get(case.baseline_trial_id, [])))
                 for raw in self.store.list_domain_for_org("ghost_case", organization_id)
                 if (case := (AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw))]
 
@@ -289,8 +382,8 @@ class HuntService:
         if baseline and trial.metrics.artifact_manifest != case.artifact_manifest:
             raise ValueError("Saved trial differs from case manifest")
         if case.policy.embodiment == "GHOST_GANTRY_XY":
-            from .cpu_evidence import verify_cpu_bundle
-            verification = verify_cpu_bundle(directory, case.policy.checkpoint_digest)
+            from .bundle_cache import cpu_bundle
+            verification = cpu_bundle(directory, case.policy.checkpoint_digest)
             manifest = json.loads((directory / "manifest.json").read_text())
             summary = json.loads((directory / "summary.json").read_text())
             if (manifest != trial.metrics.artifact_manifest or
@@ -299,8 +392,8 @@ class HuntService:
                     baseline and summary != case.measured_metrics.get("robot_metrics")):
                 raise ValueError("Retained CPU evidence differs from trial or case")
         else:
-            from .independent_validation import verify_bundle
-            verification = verify_bundle(directory, case.policy.checkpoint_digest)
+            from .bundle_cache import worker_bundle
+            verification = worker_bundle(directory, case.policy.checkpoint_digest)
             manifest = json.loads((directory / "result.json").read_text())["artifacts"]
             if manifest != trial.metrics.artifact_manifest or baseline and manifest != case.artifact_manifest:
                 raise ValueError("Retained worker manifest differs from saved trial or case")
@@ -420,11 +513,7 @@ class HuntService:
                 try:
                     self.agent_admission()
                     if not self.store.get_domain("agent_reservation", trial_id):
-                        today = int(time.time() // 86400)
-                        used = sum(int(json.loads(raw)["at"] // 86400) == today
-                                   for raw in self.store.list_domain("agent_reservation"))
-                        if self.store.job_counts()["submitted_today"] + used >= self.settings.ghost_max_jobs_per_day:
-                            raise ValueError("Daily execution budget exhausted")
+                        self.agent_execution_allowed(hunt.organization_id)
                         self.store.put_domain("agent_reservation", trial_id, json.dumps({
                             "organization_id": hunt.organization_id, "hunt_id": hunt.hunt_id, "at": time.time()}))
                 finally:
@@ -486,17 +575,14 @@ class HuntService:
             hunt.status = HuntStatus.INTERRUPTED
             self.save(hunt)
             raise
-        except ValueError as exc:
-            hunt.status = HuntStatus.BLOCKED
-            hunt.provider_errors.append(str(exc) if str(exc) == "Daily execution budget exhausted"
-                                        else "Agent Hunt stopped (ValueError); no policy failure inferred")
-            self.save(hunt)
         except Exception as exc:
             hunt.status = HuntStatus.BLOCKED
-            hunt.provider_errors.append(f"Agent Hunt stopped ({type(exc).__name__}); no policy failure inferred")
+            reason = stop_reason(exc, hunt.hunt_id)
+            hunt.provider_errors.append(reason if reason else f"Agent Hunt stopped ({type(exc).__name__}); no policy failure inferred")
             self.save(hunt)
 
     def record_agent_reproduction(self, case: AgentGhostCase, trial: AgentTrial):
+        case = self.stored_case(case.case_id) or case
         if trial.trial_id not in case.reproduction_trial_ids:
             case.reproduction_trial_ids.append(trial.trial_id)
         case.reproduction_status = self._agent_reproduction_status(case)
@@ -526,7 +612,7 @@ class HuntService:
         if not baseline:
             return
         for case_id in hunt.case_ids:
-            case = self.case(case_id)
+            case = self.stored_case(case_id)
             if case and case.baseline_trial_id == baseline.trial_id:
                 case.reproduction = reproduction_result(case, [self.store.trials[c.trial_id] for c in matching])
                 self.store.put_domain("ghost_case", case_id, case.model_dump_json())

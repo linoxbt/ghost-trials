@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import resource
 import select
 import signal
 import subprocess
@@ -287,14 +286,6 @@ def oracle(policy: AgentPolicy, scenario: AgentScenario, events: list[AgentToolE
     ]
 
 
-def _limits():
-    os.setsid()
-    resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
-    resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_NOFILE, (16, 16))
-
-
 def execute_reference(target: AgentTarget, policy: AgentPolicy, scenario: AgentScenario,
                       *, hunt_id: str, trial_id: str, objective: str, timeout_s: float = 3.0) -> AgentTrial:
     """Execute only checked-in targets. This is not an arbitrary-code sandbox."""
@@ -314,10 +305,11 @@ def execute_reference(target: AgentTarget, policy: AgentPolicy, scenario: AgentS
     state = dict(scenario.initial_state)
     proc = None
     try:
-        proc = subprocess.Popen([sys.executable, "-u", "-m", "ghost_trials.agent_reference"],
+        # agent_sandbox applies CPU/memory/file limits in the child; no preexec_fn from worker threads.
+        proc = subprocess.Popen([sys.executable, "-u", "-m", "ghost_trials.agent_sandbox"],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 env={"PYTHONPATH": os.pathsep.join(sys.path), "PYTHONNOUSERSITE": "1"},
-                                preexec_fn=_limits, close_fds=True, bufsize=0)
+                                start_new_session=True, close_fds=True, bufsize=0)
         proc.stdin.write(canonical(request) + b"\n")
         proc.stdin.flush()
         deadline = time.monotonic() + timeout_s

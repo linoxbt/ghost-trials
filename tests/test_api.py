@@ -27,9 +27,10 @@ async def test_api_accepts_and_completes_trial(tmp_path):
             health = await client.get("/health")
             assert health.status_code == 200
             assert health.json()["api_contract"] == "multidomain-v1"
-            assert (await client.get("/assets/app.css")).status_code == 200
-            assert (await client.get("/assets/app.js")).status_code == 200
-            assert (await client.get("/assets/production.css")).status_code == 200
+            assert (await client.get("/assets/workspace.css")).status_code == 200
+            assert (await client.get("/assets/workspace.js")).status_code == 200
+            # The retired legacy dashboard is no longer served.
+            assert (await client.get("/assets/app.js")).status_code == 404
             preview = await client.get(f"/artifacts/{next(iter(store.scenarios))}/preview")
             assert preview.headers["x-frame-options"] == "SAMEORIGIN"
 
@@ -69,3 +70,10 @@ async def test_api_rejects_short_prompt(tmp_path):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post("/scenarios", json={"prompt": "box"})
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_uptime_probes_accept_head():
+    from ghost_trials.app import app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.head("/")).status_code == 200

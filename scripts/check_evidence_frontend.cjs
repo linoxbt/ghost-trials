@@ -17,7 +17,7 @@ const origin='http://127.0.0.1:8013';
   assert.ok(records.every(t=>!t.score_eligible&&t.evidence_class==='synthetic_demo'));
   await page.goto(origin+'/app/#/overview');
   await page.getByRole('heading',{name:'Experimental evaluation platform — not safety certification'}).waitFor();
-  await page.getByText('Real-trial milestone: pending actual policy execution',{exact:true}).waitFor();
+  await page.getByText(/Real-trial milestone: pending/).waitFor();
   assert.equal(await page.locator('.stat-value').first().innerText(),'—');
   await page.goto(origin+'/app/#/trials');
   await page.getByLabel('Filter evidence provenance').waitFor();
@@ -44,7 +44,7 @@ const origin='http://127.0.0.1:8013';
    }
   }
   await page.setViewportSize({width:390,height:844});await page.goto(origin+'/app/#/overview');
-  await page.getByText('Real-trial milestone: pending actual policy execution',{exact:true}).waitFor();
+  await page.getByText(/Real-trial milestone: pending/).waitFor();
   await page.screenshot({path:'/tmp/ghost-evidence-overview-mobile.png',fullPage:true});
   assert.deepEqual(errors,[]);
   console.log('Passed: fixture exclusion, null score, pending real execution, evidence filters/labels, reproducibility download, and 320/390/1440px layout. No paid provider or hardware used.');

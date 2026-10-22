@@ -14,7 +14,7 @@ FastAPI serves the animated landing page at `/`, documentation at `/docs`, and t
 | `/#/scenarios` | Supported hazard templates and evaluated scenarios |
 | `/#/new` | Trial creation, optional seed, severity, inline submission errors |
 | `/#/reports` | Completed records, evaluation export, scoring rubric |
-| `/#/system` | Server-reported provider configuration and Advanced/Labs links to physical capture, benchmarks and manual trials |
+| `/#/account` | Signed-in identity, workspace membership, and workspace tools: team, physical recordings, benchmarks, scenarios, reports and manual trials |
 
 The desktop navigation can be collapsed using the hamburger button. Below 900px it becomes a drawer with an overlay, focus containment, Escape to close, and focus restoration. Below 620px, ledgers become stacked records with labeled measurements and full-width review/export actions. Form controls use 16px text to avoid automatic zoom on iPhones. Form inputs and stable trial media are retained during background refreshes. WebSocket updates reconnect automatically; polling also refreshes the data every 20 seconds.
 

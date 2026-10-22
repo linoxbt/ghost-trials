@@ -28,7 +28,7 @@
       </section>
       <section class="auth-panel" id="sign-in" aria-labelledby="sign-in-title">
         <h2 id="sign-in-title">Sign in<span>.</span></h2>
-        <div id="privy-login"><p role="status">Loading secure sign-in…</p></div>
+        <div id="privy-login"><p id="signin-loading" role="status">Loading secure sign-in…</p><noscript><p class="auth-error">Sign-in needs JavaScript. Enable it, or use private deployment access below if your team provided a token.</p></noscript></div>
         <a id="demo-link" class="auth-secondary" href="/app/" hidden>Preview the synthetic demo →</a>
         <details id="private-team" hidden>
           <summary>Private deployment access</summary>
@@ -42,6 +42,7 @@
     </main>
     <footer class="auth-footer"><span>GHOST TRIALS · PRIVATE WORKSPACE</span></footer>
   </div>
+  <script src="/assets/login-fallback.js" defer></script>
   <script type="module" src="/assets/auth/login.js"></script>
 </body>
 </html>

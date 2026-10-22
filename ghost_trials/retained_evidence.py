@@ -24,8 +24,8 @@ def reporting_trial(trial: Trial, scenario: Scenario, artifact_root: Path) -> Tr
             raise ValueError("Unsafe artifact directory")
         expected = metrics.policy_checkpoint_digest
         if trial.embodiment == "GHOST_GANTRY_XY":
-            from .cpu_evidence import verify_cpu_bundle
-            verification = verify_cpu_bundle(directory, expected)
+            from .bundle_cache import cpu_bundle
+            verification = cpu_bundle(directory, expected)
             manifest = json.loads((directory / "manifest.json").read_text())
             summary = json.loads((directory / "summary.json").read_text())
             recipe = json.loads((directory / "recipe.json").read_text())
@@ -33,8 +33,8 @@ def reporting_trial(trial: Trial, scenario: Scenario, artifact_root: Path) -> Tr
                     or recipe != scenario.execution_recipe):
                 raise ValueError("CPU artifacts differ from saved trial or scenario")
         else:
-            from .independent_validation import verify_bundle
-            verification = verify_bundle(directory, expected)
+            from .bundle_cache import worker_bundle
+            verification = worker_bundle(directory, expected)
             result = json.loads((directory / "result.json").read_text())
             if result["artifacts"] != metrics.artifact_manifest:
                 raise ValueError("Worker artifacts differ from saved trial")

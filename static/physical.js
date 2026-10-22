@@ -77,7 +77,16 @@ async function mountPhysical(){
     }
    }
    status.textContent='Decoding video and independently checking telemetry…';
-   await json(`/physical/sessions/${session.session_id}/validate`,{method:'POST'});notify('Recording validated. No paid judge was called.');await refresh(true);if(root.isConnected)await reload();
+   try{await json(`/physical/sessions/${session.session_id}/validate`,{method:'POST'});}
+   catch(e){
+    // The hosted proxy can time out while decoding continues on the backend; wait for the stored result.
+    if(e.status&&![502,503,504].includes(e.status))throw e;
+    status.textContent='Validation is still running on the server; checking its result…';
+    let validated=false;
+    for(let i=0;i<40&&!validated;i++){await new Promise(done=>setTimeout(done,3000));const current=await json(`/physical/sessions/${session.session_id}`).catch(()=>null);validated=current?.status==='validated';}
+    if(!validated)throw new Error('Validation did not finish. Check the recording and select Validate again.');
+   }
+   notify('Recording validated. No paid judge was called.');await refresh(true);if(root.isConnected)await reload();
   }catch(e){status.textContent=e.message;}finally{input.disabled=false;}
  }
  await reload();

@@ -1,6 +1,7 @@
 name: Deploy verified frontend
 on:
   workflow_dispatch:
+# Production deploys are only accepted from main; protect the production environment to enforce this too.
 permissions:
   contents: read
 concurrency:
@@ -14,36 +15,39 @@ jobs:
       GHOST_MODE: local
       GHOST_PIPELINE_DELAY_SECONDS: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       - name: Install recording-validation tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: "0.11.21"
-      - run: uv sync --frozen --extra dev --extra physics --extra models --extra storage
+      - run: uv sync --locked --extra dev --extra models --extra storage
       - run: uv run --frozen pytest -q
   frontend:
     needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 15
     env:
       GHOST_BACKEND_ORIGIN: ${{ vars.GHOST_BACKEND_ORIGIN }}
-      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run build:auth
       - run: npm audit --omit=dev --audit-level=high
       - name: Build and check backend
@@ -59,4 +63,13 @@ jobs:
             fi
           done
       - name: Deploy
-        run: npx --yes netlify-cli@23.6.0 deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"
+        # The token is visible to this step only, never to dependency install scripts.
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID must be set in the production environment" >&2
+            exit 1
+          fi
+          npx --yes netlify-cli@23.6.0 deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"

@@ -1,4 +1,4 @@
-from ghost_trials.hunt import (GhostCase, ReproductionResult, TrialCandidate, empirical_boundary,
+from ghost_trials.hunt import (GhostCase, TrialCandidate, empirical_boundary,
                                reproduction_result, compare_case_regression, failure_families)
 from ghost_trials.models import Scenario, StructuredDescription, Trial, TrialMetrics, TrialStatus
 from test_hunt import hunt

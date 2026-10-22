@@ -1,5 +1,7 @@
 # Private production deployment and promotion gates
 
+> **Scope note (22 October 2026):** this page covers a self-hosted Docker/Caddy deployment. The current hosted release runs on Railway (backend) and Netlify (frontend); see [CPU_MIGRATION.md](CPU_MIGRATION.md) and [NETLIFY.md](NETLIFY.md).
+
 This is an **organization-isolated, single-API-process** deployment. It is not a
 scale-out SaaS, an accredited safety certification, or proof of real GPU
 execution. No cloud resources are created by these commands. Existing provider

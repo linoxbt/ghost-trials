@@ -15,7 +15,7 @@ and organization IDs are never trusted.
    Google may require OAuth configuration in Google Cloud before it appears.
 2. Add the exact HTTPS frontend origin to Dynamic's allowed origins. Configure
    the JWT audience to that same origin, for example
-   `https://ghost-trials.netlify.app`.
+   `https://ghosttrials.site`.
 3. On the backend set `GHOST_AUTH_PROVIDER=dynamic`, `DYNAMIC_ENVIRONMENT_ID`,
    `DYNAMIC_JWT_AUDIENCE`, `GHOST_CUSTOMER_AUTH_REQUIRED=true`,
    `GHOST_PUBLIC_DEPLOYMENT=true`, `GHOST_COOKIE_SECURE=true`, and

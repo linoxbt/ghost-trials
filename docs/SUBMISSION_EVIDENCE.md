@@ -1,5 +1,7 @@
 # A credible Ghost Trials demonstration
 
+> **Scope note (22 October 2026):** this checklist targets the GPU/G1 path, where no policy execution has been demonstrated. Real CPU MuJoCo controller execution *has* been demonstrated; see [CPU_MIGRATION.md](CPU_MIGRATION.md) and the root [submission.md](../submission.md).
+
 Ghost Trials is an experimental evaluation platform, not a safety-certification service.
 No genuine robot-policy execution has yet been demonstrated in this deployment.
 Do not use synthetic or unknown-provenance records as evidence of real robot behavior.

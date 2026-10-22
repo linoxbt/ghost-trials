@@ -1,4 +1,3 @@
-import asyncio
 import json
 import time
 import uuid
@@ -402,3 +401,26 @@ async def test_live_events_filtered_and_membership_revocation(identities):
         assert sa.closed and sa not in subscribers
     finally:
         subscribers.discard(sa);subscribers.discard(sb)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_jwks_refetches_for_rotated_key_after_throttle(tmp_path, monkeypatch):
+    environment = str(uuid.uuid4())
+    settings = Settings(ghost_auth_provider='dynamic', dynamic_environment_id=environment,
+                        dynamic_jwt_audience='https://console.test')
+    accounts = Accounts(DurableStore(tmp_path / 'rotate.sqlite3'), settings)
+    old, new = (rsa.generate_private_key(public_exponent=65537, key_size=2048) for _ in range(2))
+    keys = [json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(old.public_key())) | {'kid': 'old', 'alg': 'RS256'}]
+    requests = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(200, json={'keys': keys})
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda *a, **k: original_client(*a, transport=httpx.MockTransport(handler), **k))
+    claims = {'sub': 'x', 'iat': int(time.time()), 'exp': int(time.time()) + 300}
+    await accounts.dynamic_verification_key(jwt.encode(claims, old, algorithm='RS256', headers={'kid': 'old'}))
+    keys.append(json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(new.public_key())) | {'kid': 'new', 'alg': 'RS256'})
+    accounts.dynamic_jwks_fetched_at -= 31
+    assert await accounts.dynamic_verification_key(jwt.encode(claims, new, algorithm='RS256', headers={'kid': 'new'}))
+    assert len(requests) == 2

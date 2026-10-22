@@ -1,11 +1,12 @@
 """Retain and independently recompute headless CPU MuJoCo trajectory evidence."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
-from xml.sax.saxutils import escape
 
 from .cpu_robot import ROBOT_ID, controller, controller_source_digest, initial_block_y, validate_recipe
 
@@ -98,6 +99,14 @@ class CpuEvidenceRepository:
             raise ValueError("CPU execution evidence is missing")
         directory = self.root / "trials" / trial.trial_id
         directory.mkdir(parents=True, exist_ok=False)
+        try:
+            return await asyncio.to_thread(self._write_bundle, directory, trial, scenario, result)
+        except BaseException:
+            # A partial bundle is never evidence and would block a later capture for this trial.
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+
+    def _write_bundle(self, directory, trial, scenario, result):
         payloads = {
             "telemetry.jsonl": ("\n".join(json.dumps(row, sort_keys=True) for row in result["trace"]) + "\n").encode(),
             "recipe.json": json.dumps(result["recipe"], sort_keys=True).encode(),

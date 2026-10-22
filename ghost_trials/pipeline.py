@@ -173,11 +173,15 @@ class CertificationPipeline:
     async def _status(self, trial: Trial, status: TrialStatus, message: str) -> None:
         trial.status = status
         await self.store.put_trial(trial)
-        await self.publish(
-            LiveEvent(
-                trial_id=trial.trial_id,
-                status=status,
-                score_category=trial.score_category,
-                message=message,
+        try:
+            await self.publish(
+                LiveEvent(
+                    trial_id=trial.trial_id,
+                    status=status,
+                    score_category=trial.score_category,
+                    message=message,
+                )
             )
-        )
+        except Exception:
+            # A live-notification failure must never change a stored trial outcome.
+            logging.getLogger(__name__).exception("publish_failed trial_id=%s status=%s", trial.trial_id, status.value)

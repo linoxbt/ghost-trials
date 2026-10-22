@@ -133,3 +133,18 @@ def test_trace_metric_derivation_is_evidence_based(tmp_path):
     assert metrics.time_to_react_ms == 320
     assert metrics.min_clearance_m == 0.55
     assert metrics.policy_checkpoint_digest == "sha256:abc"
+
+
+def test_railway_refuses_ephemeral_state(tmp_path):
+    import os
+    import subprocess
+    import sys
+    env = {**os.environ, "RAILWAY_ENVIRONMENT_ID": "env_test", "GHOST_MODE": "cpu", "GHOST_SCENARIO_PROVIDER": "cpu",
+           "GHOST_SIMULATOR_PROVIDER": "mujoco_cpu", "GHOST_JUDGE_PROVIDER": "cpu",
+           "GHOST_DATA_PATH": str(tmp_path / "state.sqlite3"), "GHOST_ARTIFACT_ROOT": str(tmp_path / "artifacts")}
+    env.pop("RAILWAY_VOLUME_MOUNT_PATH", None)
+    result = subprocess.run([sys.executable, "-c", "import ghost_trials.app"], env=env, capture_output=True, text=True)
+    assert result.returncode != 0 and "attached volume" in result.stderr
+    env["RAILWAY_VOLUME_MOUNT_PATH"] = str(tmp_path / "elsewhere")
+    result = subprocess.run([sys.executable, "-c", "import ghost_trials.app"], env=env, capture_output=True, text=True)
+    assert result.returncode != 0 and "attached volume" in result.stderr

@@ -20,7 +20,7 @@ COPY deployment/start-api.sh ./deployment/start-api.sh
 RUN uv sync --frozen --no-dev --extra storage
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV GHOST_DATA_PATH=/data/state.json
+ENV GHOST_DATA_PATH=/data/state.sqlite3
 ENV GHOST_ARTIFACT_ROOT=/data/artifacts
 RUN install -d -m 0700 -o 10001 -g 10001 /data
 RUN chmod 0755 /app/deployment/start-api.sh
@@ -28,4 +28,6 @@ RUN chmod 0755 /app/deployment/start-api.sh
 # to UID 10001 before starting the API. Railway volumes start root-owned.
 USER 0:0
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8000\")}/health', timeout=5)"
 CMD ["/app/deployment/start-api.sh"]
