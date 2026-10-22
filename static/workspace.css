@@ -53,3 +53,10 @@ main{padding:34px 36px 42px;width:100%;max-width:1600px;margin:0 auto;flex:1}.pa
 
 /* Viewer role: hide controls the server would reject with "Read-only role". */
 .read-only-role [data-case-replay],.read-only-role [data-case-regress],.read-only-role [data-agent-replay],.read-only-role [data-agent-regress],.read-only-role [data-hunt-resume],.read-only-role [data-guided-hunt],.read-only-role [data-cancel-trial],.read-only-role #huntForm [type=submit],.read-only-role #agentHuntForm [type=submit],.read-only-role [data-replay]{display:none!important}
+
+/* The breadcrumb yields space first so the top bar never exceeds narrow viewports. */
+.breadcrumb{min-width:0;overflow:hidden}.breadcrumb>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar-right{flex-shrink:0}
+/* Grid tracks never grow past the viewport because of one unbreakable child (trial IDs, warnings). */
+main,#content{min-width:0}.preview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.preview-grid>*,.panel{min-width:0}
+@media(max-width:620px){.preview-grid{grid-template-columns:minmax(0,1fr)}}
+.mono,.evidence-warnings li,.panel-foot{overflow-wrap:anywhere}

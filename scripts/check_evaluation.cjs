@@ -41,7 +41,11 @@ const origin=(process.env.GHOST_PREVIEW_URL||'http://127.0.0.1:8010').replace(/\
    await page.setViewportSize({width,height:900});
    for(const [path,ready] of [['compare','Measured differences'],['benchmarks','Execution scope'],['trials/'+records[0].trial_id,'Incident timeline']]){
     await page.goto(origin+'/app/#/'+path);await page.getByRole('heading',{name:ready,exact:true}).waitFor();
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${path} overflow at ${width}`);
+    // On failure, name the elements wider than the viewport so CI logs show the cause.
+    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth?null:{scrollWidth:document.documentElement.scrollWidth,
+      offenders:[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>innerWidth+0.5).slice(-8)
+        .map(el=>`${el.tagName.toLowerCase()}${el.id?'#'+el.id:''}${el.className&&typeof el.className==='string'?'.'+el.className.trim().split(/\s+/).join('.'):''} right=${Math.round(el.getBoundingClientRect().right)} "${(el.textContent||'').trim().slice(0,30)}"`)});
+    assert.equal(overflow,null,`${path} overflow at ${width}: ${JSON.stringify(overflow)}`);
    }
   }
   // Network failure must be displayed, not fabricated as a valid comparison.
