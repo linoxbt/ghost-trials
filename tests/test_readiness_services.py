@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 import hashlib
 import io
 import tarfile
@@ -364,3 +366,65 @@ def test_role_cookie_without_jti_is_rejected():
     legacy = payload + "." + hmac.new(("a" * 48).encode(), payload.encode(), hashlib.sha256).hexdigest()
     assert access.cookie_role(legacy) is None
     assert access.cookie_role(access.session("admin")) == "admin"
+
+
+@pytest.mark.asyncio
+async def test_failed_sign_in_flood_cannot_lock_out_a_valid_sign_in(private_api, monkeypatch):
+    app, settings, store, tokens = private_api
+    monkeypatch.setattr(settings, "ghost_max_auth_attempts_per_minute", 5)
+    monkeypatch.setattr(settings, "ghost_max_anonymous_requests_per_minute", 5)
+    origin = {"Origin": "https://console.test", "X-Forwarded-For": "198.51.100.7"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        codes = [(await client.post("/auth/session", headers=origin, json={"token": "x" * 48})).status_code for _ in range(12)]
+        assert codes[:5] == [401] * 5 and set(codes[5:]) == {429}
+        login = await client.post("/auth/session", headers=origin, json={"token": tokens["operator"]})
+    assert login.status_code == 303 and "ghost_session" in login.cookies
+
+
+@pytest.mark.asyncio
+async def test_pages_enforce_csp_and_reports_are_accepted(private_api):
+    app, settings, store, tokens = private_api
+    from ghost_trials.csp import PAGE_CSP
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        for path in ("/", "/auth/login", "/docs"):
+            response = await client.get(path, follow_redirects=True)
+            assert response.headers["content-security-policy"] == PAGE_CSP, path
+        assert "'unsafe-eval'" not in PAGE_CSP and "frame-ancestors 'none'" in PAGE_CSP
+        assert "content-security-policy" not in (await client.get("/health")).headers
+        report = {"csp-report": {"effective-directive": "script-src-elem", "blocked-uri": "https://evil.test/x.js?token=secret"}}
+        response = await client.post("/csp-report", content=json.dumps(report), headers={"Content-Type": "application/csp-report"})
+        assert response.status_code == 204
+        assert (await client.post("/csp-report", content=b"not json")).status_code == 204
+
+
+def test_netlify_build_enforces_the_shared_csp(tmp_path, monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("build_netlify", Path(__file__).resolve().parent.parent / "scripts" / "build_netlify.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    from ghost_trials.csp import PAGE_CSP
+    assert f"Content-Security-Policy: {PAGE_CSP}" in build.HEADERS and "Report-Only" not in build.HEADERS
+    landing = (build.SOURCE / "landing.html").read_text()
+    assert "<script>" not in landing, "inline scripts would be blocked by the enforced CSP"
+
+
+@pytest.mark.asyncio
+async def test_recovery_releases_a_job_whose_trial_record_is_unreadable(tmp_path):
+    from types import SimpleNamespace
+    from ghost_trials.jobs import JobRunner
+    store = DurableStore(tmp_path / "state.sqlite3")
+    with store.connect() as db:
+        db.execute("INSERT INTO records VALUES('trial','trl_bad',?)", ('{"not": "a trial"}',))
+        db.execute("INSERT INTO jobs(id,state,submitted) VALUES('trl_bad','running',?)", (1.0,))
+    await store.load()
+    await JobRunner(store, None, SimpleNamespace()).recover()
+    assert store.job("trl_bad")["state"] == "error" and store.job_counts()["pending"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rejected_form_token_returns_to_the_sign_in_page(private_api):
+    app, settings, store, tokens = private_api
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        response = await client.post("/auth/session", content="token=wrong", headers={
+            "Origin": "https://console.test", "Content-Type": "application/x-www-form-urlencoded"})
+    assert response.status_code == 303 and response.headers["location"] == "/auth/login?token_error=invalid"

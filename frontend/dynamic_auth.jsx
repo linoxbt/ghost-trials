@@ -1,13 +1,15 @@
-import React, {useState} from 'react';
+import React, {useEffect,useState} from 'react';
 import {DynamicContextProvider,DynamicEmbeddedWidget,getAuthToken,useDynamicContext,useIsLoggedIn,
   useRegisterPasskey,useSignInWithPasskey} from '@dynamic-labs/sdk-react-core';
+import {clearSignedOut,destination,signedOut} from './after_sign_in.js';
 
 function DynamicSignIn({api}){
-  const {sdkHasLoaded}=useDynamicContext();
+  const {sdkHasLoaded,handleLogOut}=useDynamicContext();
   const loggedIn=useIsLoggedIn();
   const registerPasskey=useRegisterPasskey();
   const signInWithPasskey=useSignInWithPasskey();
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  useEffect(()=>{if(sdkHasLoaded&&signedOut()){if(loggedIn)void handleLogOut().finally(clearSignedOut);else clearSignedOut();}},[sdkHasLoaded,loggedIn]);
 
   async function runPasskey(action,successMessage){
     setBusy(true);setError('');setNotice('');
@@ -34,7 +36,7 @@ function DynamicSignIn({api}){
           throw new Error(`${err.message} You are signed in: select Open workspace to continue, or ask for a new invitation.`);
         }
         await api('/organizations/switch',{organization_id:result.organization_id});}
-      location.replace(new URLSearchParams(location.search).get('manage')==='passkey'?'/app/#/account':'/app/');
+      location.replace(destination());
     }catch(err){setError(err.message);setBusy(false);}
   }
 

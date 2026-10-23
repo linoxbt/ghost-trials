@@ -76,3 +76,28 @@ async def test_publish_tolerates_subscriber_changes_mid_broadcast(monkeypatch):
     monkeypatch.setattr(app_module.store, "trials", {"trl_live": trial})
     await app_module.publish(LiveEvent(trial_id="trl_live", status=TrialStatus.DONE, message="done"))
     assert first.sent == 1 and first in app_module.subscribers
+
+
+@pytest.mark.asyncio
+async def test_a_stuck_socket_cannot_stall_the_broadcast(monkeypatch):
+    import time as _time
+    from ghost_trials import app as app_module
+    from ghost_trials.models import LiveEvent
+
+    class Socket:
+        def __init__(self, delay):
+            self.state = SimpleNamespace(principal=SimpleNamespace(organization_id="org_a"))
+            self.delay, self.sent = delay, 0
+
+        async def send_json(self, payload):
+            await asyncio.sleep(self.delay)
+            self.sent += 1
+
+    sockets = [Socket(60) for _ in range(5)] + [Socket(0)]
+    monkeypatch.setattr(app_module, "subscribers", set(sockets))
+    monkeypatch.setattr(app_module.access, "principal", lambda socket: socket.state.principal)
+    monkeypatch.setattr(app_module.store, "trials", {"trl_live": SimpleNamespace(organization_id="org_a")})
+    started = _time.monotonic()
+    await app_module.publish(LiveEvent(trial_id="trl_live", status=TrialStatus.DONE, message="done"))
+    assert _time.monotonic() - started < 3.5
+    assert sockets[-1].sent == 1 and app_module.subscribers == {sockets[-1]}

@@ -24,7 +24,16 @@ MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS jobs_submitted ON jobs(submitted);
     CREATE TABLE IF NOT EXISTS revoked_sessions(jti TEXT PRIMARY KEY, expires INTEGER NOT NULL);
     """,
+    # 2: per-person admission caps.
+    """
+    ALTER TABLE jobs ADD COLUMN subject TEXT;
+    CREATE INDEX IF NOT EXISTS jobs_subject ON jobs(subject, submitted);
+    """,
 ]
+
+def individual_subject(subject) -> bool:
+    """Per-person caps apply to signed-in people, not shared deployment tokens or the system."""
+    return bool(subject) and subject not in {"system", "demo", "role_token"} and not subject.startswith("role:")
 
 
 class QuotaExceeded(Exception):
@@ -44,10 +53,14 @@ class DurableStore(TrialStore):
 
     @contextmanager
     def connect(self):
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        first = getattr(self, "_prepared_path", None) != self.database_path
+        if first:
+            self.database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.database_path, timeout=10)
-        # Set the main-file mode before SQLite creates WAL/shared-memory files.
-        os.chmod(self.database_path, 0o600)
+        if first:
+            # Set the main-file mode before SQLite creates WAL/shared-memory files (once per database).
+            os.chmod(self.database_path, 0o600)
+            self._prepared_path = self.database_path
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA synchronous=FULL")
         with self._schema_lock:
@@ -160,13 +173,48 @@ class DurableStore(TrialStore):
                 "SELECT payload FROM records WHERE kind=? AND json_extract(payload, '$.organization_id')=? ORDER BY id DESC",
                 (kind, organization_id))]
 
+    # Called (from any thread) after a job is queued so the runner wakes without polling.
+    on_enqueue = None
+
+    def job_queued(self):
+        if self.on_enqueue:
+            self.on_enqueue()
+
     def enqueue(self, trial_id, request_key=None, request_hash=None):
         with self.connect() as db:
             db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted) VALUES(?,?,?,?,?)",
                        (trial_id, "queued", request_key, request_hash, time.time()))
+        self.job_queued()
 
-    # (pending, per-day) execution caps for one organization; None disables them.
+    # (pending, per-day) execution caps for one organization, and for one person across all of
+    # their workspaces; None disables them.
     org_job_limits: tuple[int, int] | None = None
+    subject_job_limits: tuple[int, int] | None = None
+
+    def subject_job_counts(self, db, subject):
+        day_start = int(time.time() // 86400) * 86400
+        pending, today = db.execute("SELECT SUM(state IN ('queued','running')), SUM(submitted>=?) FROM jobs WHERE subject=?",
+                                    (day_start, subject)).fetchone()
+        return int(pending or 0), int(today or 0)
+
+    def subject_usage(self, subject):
+        """(pending, submitted today) trial jobs started by one person."""
+        with self.connect() as db:
+            return self.subject_job_counts(db, subject)
+
+    def check_job_limits(self, db, organization_id, subject):
+        if self.org_job_limits and organization_id:
+            pending, today = self.org_job_counts(db, organization_id)
+            if pending >= self.org_job_limits[0]:
+                raise PendingQuotaExceeded("This workspace already has the maximum number of queued trials")
+            if today >= self.org_job_limits[1]:
+                raise QuotaExceeded("This workspace has used its daily trial allowance")
+        if self.subject_job_limits and individual_subject(subject):
+            pending, today = self.subject_job_counts(db, subject)
+            if pending >= self.subject_job_limits[0]:
+                raise PendingQuotaExceeded("You already have the maximum number of queued trials")
+            if today >= self.subject_job_limits[1]:
+                raise QuotaExceeded("You have used your daily trial allowance across your workspaces")
 
     def org_job_counts(self, db, organization_id):
         day_start = int(time.time() // 86400) * 86400
@@ -181,13 +229,14 @@ class DurableStore(TrialStore):
         with self.connect() as db:
             return self.org_job_counts(db, organization_id)
 
-    def agent_reservations_today(self, organization_id=None):
+    def agent_reservations_today(self, organization_id=None, subject=None):
         day_start = int(time.time() // 86400) * 86400
         query = "SELECT COUNT(*) FROM records WHERE kind='agent_reservation' AND json_extract(payload,'$.at')>=?"
         args = [day_start]
-        if organization_id is not None:
-            query += " AND json_extract(payload,'$.organization_id')=?"
-            args.append(organization_id)
+        for field, value in (("organization_id", organization_id), ("subject", subject)):
+            if value is not None:
+                query += f" AND json_extract(payload,'$.{field}')=?"
+                args.append(value)
         with self.connect() as db:
             return db.execute(query, args).fetchone()[0]
 
@@ -195,22 +244,18 @@ class DurableStore(TrialStore):
         # Acceptance and idempotency become durable in the same transaction.
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if self.org_job_limits and trial.organization_id:
-                pending, today = self.org_job_counts(db, trial.organization_id)
-                if pending >= self.org_job_limits[0]:
-                    raise PendingQuotaExceeded("This workspace already has the maximum number of queued trials")
-                if today >= self.org_job_limits[1]:
-                    raise QuotaExceeded("This workspace has used its daily trial allowance")
+            self.check_job_limits(db, trial.organization_id, subject)
             if reservation_cents:
                 from .accounts import reserve_budget
                 reserve_budget(db, trial.trial_id, trial.organization_id, reservation_cents, platform_limit)
             db.execute("INSERT OR REPLACE INTO records VALUES('scenario',?,?)",
                        (scenario.scenario_id, scenario.model_dump_json()))
             db.execute("INSERT INTO records VALUES('trial',?,?)", (trial.trial_id, trial.model_dump_json()))
-            db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted) VALUES(?,?,?,?,?)",
-                       (trial.trial_id, "queued", request_key, request_hash, time.time()))
+            db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted,subject) VALUES(?,?,?,?,?,?)",
+                       (trial.trial_id, "queued", request_key, request_hash, time.time(), subject))
         self.scenarios[scenario.scenario_id] = scenario
         self.trials[trial.trial_id] = trial
+        self.job_queued()
         self.audit("job_accepted", "operator", trial.trial_id, organization_id=trial.organization_id, subject=subject)
 
     def reserve_model_review(self, trial, cents: int, platform_limit: int) -> bool:
@@ -231,18 +276,29 @@ class DurableStore(TrialStore):
             return dict(row) if row else None
 
     def enqueue_recording_judge(self, trial, reservation_cents, platform_limit, subject):
-        """Reserve paid judge admission and enqueue an existing recording atomically."""
+        """Reserve paid judge admission and enqueue a recording atomically; a failed judge may be retried."""
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT payload FROM records WHERE kind='trial' AND id=?", (trial.trial_id,)).fetchone()
-            if not row or json.loads(row[0]).get("status") != "recorded":
+            prior = db.execute("SELECT state FROM jobs WHERE id=?", (trial.trial_id,)).fetchone()
+            status = json.loads(row[0]).get("status") if row else None
+            retry = bool(prior) and prior[0] == "error" and status == "error"
+            if not row or not (status == "recorded" and not prior or retry):
                 raise ValueError("Recording is already queued or not validated")
+            self.check_job_limits(db, trial.organization_id, subject)
             from .accounts import reserve_budget
-            reserve_budget(db, trial.trial_id, trial.organization_id, reservation_cents, platform_limit)
+            attempt = time.time()
+            # Each attempt is a separate, never-refunded reservation: a failed request may still have cost money.
+            reserve_budget(db, f"{trial.trial_id}:judge-retry:{attempt}" if retry else trial.trial_id,
+                           trial.organization_id, reservation_cents, platform_limit)
             db.execute("UPDATE records SET payload=? WHERE kind='trial' AND id=?", (trial.model_dump_json(), trial.trial_id))
-            db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted) VALUES(?,?,?,?,?)",
-                       (trial.trial_id, "queued", "physical-judge:" + trial.trial_id, "physical-judge-v1", time.time()))
+            db.execute("INSERT INTO jobs(id,state,request_key,request_hash,submitted,subject) VALUES(?,?,?,?,?,?) "
+                       "ON CONFLICT(id) DO UPDATE SET state='queued',request_key=excluded.request_key,"
+                       "submitted=excluded.submitted,subject=excluded.subject,started=NULL,finished=NULL",
+                       (trial.trial_id, "queued", "physical-judge:" + trial.trial_id + (f":retry:{attempt}" if retry else ""),
+                        "physical-judge-v1", attempt, subject))
         self.trials[trial.trial_id] = trial
+        self.job_queued()
         self.audit("physical_judge_queued", "operator", trial.trial_id,
                    organization_id=trial.organization_id, subject=subject)
 
@@ -282,6 +338,10 @@ class DurableStore(TrialStore):
             if row:
                 db.execute("UPDATE jobs SET state='running',started=? WHERE id=?", (time.time(), row["id"]))
                 return row["id"]
+
+    def pending_job_ids(self):
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT id FROM jobs WHERE state IN ('queued','running')")]
 
     def job_counts(self):
         with self.connect() as db:

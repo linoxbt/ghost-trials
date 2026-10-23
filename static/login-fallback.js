@@ -5,3 +5,12 @@ setTimeout(()=>{
  if(!slot||!document.getElementById('signin-loading'))return;
  slot.innerHTML='<p class="auth-error" role="alert">Secure sign-in could not load. Check your connection or content blocker, then <a href="">reload this page</a>.</p>';
 },12000);
+
+// A rejected deployment token returns here with a reason; show it next to the form.
+const tokenError=new URLSearchParams(location.search).get('token_error');
+if(tokenError){
+ const line=document.getElementById('token-error');
+ line.textContent=tokenError==='rate'?'Too many failed attempts. Wait a minute, then try again.':'That access token was not accepted. Check it and try again.';
+ line.hidden=false;
+ const team=document.getElementById('private-team');team.hidden=false;team.open=true;
+}

@@ -59,7 +59,7 @@ async function mountEvidence(id){
   replay.onclick=async()=>{
    if(!local()&&t.embodiment!=='GHOST_GANTRY_XY'&&!confirm('This executes the configured robot policy and judge against the saved scenario. Provider charges may apply. Continue?'))return;
    replay.disabled=true;
-   try{const accepted=await json(`/trials/${encodeURIComponent(id)}/replay`,{method:'POST'});trials.unshift({...accepted.trial,scenario:accepted.scenario});location.hash=hrefTrial(accepted.trial);notify('Saved scenario reused without regenerating the hazard.');}
+   try{const accepted=await json(`/trials/${encodeURIComponent(id)}/replay`,{method:'POST',headers:{'Idempotency-Key':requestKey('replay:'+id)}});trials.unshift({...accepted.trial,scenario:accepted.scenario});location.hash=hrefTrial(accepted.trial);notify('Saved scenario reused without regenerating the hazard.');}
    catch(error){notify(error.message);replay.disabled=false;}
   };
   $('#content .heading-actions')?.append(replay);

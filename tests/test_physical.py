@@ -229,3 +229,71 @@ def test_physical_observer_has_no_motor_publishers():
     assert "ChannelSubscriber" in names and "ChannelPublisher" not in names
     assert not any(isinstance(n,ast.Attribute) and n.attr in {"Write","ReleaseMode","SetVelocity"} for n in ast.walk(tree))
     with pytest.raises(ValueError): G1Observer("lo")
+
+
+@pytest.mark.asyncio
+async def test_cancel_frees_storage_and_quota_caps_bundles(physical_api, fixture_bundle, monkeypatch):
+    app, access, store, settings, token = physical_api
+    root, setup, _ = fixture_bundle
+    bundle = sum(record["bytes"] for record in manifest(root).values())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        await signin(client, token())
+        first=(await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        route="/physical/sessions/"+first["session_id"]
+        assert (await client.put(route+"/manifest", json=manifest(root), headers=ORIGIN)).status_code == 200
+        data=(root/"response.mp4").read_bytes()
+        assert (await client.put(route+"/artifacts/response.mp4", content=data,
+            headers={**ORIGIN,"Content-Range":f"bytes 0-{len(data)-1}/{len(data)}"})).status_code == 200
+        stored = settings.ghost_artifact_root / "physical" / first["session_id"]
+        assert (stored / "response.mp4").exists()
+        # A second bundle would exceed this workspace's storage quota while the first holds its bytes.
+        monkeypatch.setattr(settings, "ghost_physical_org_storage_bytes", bundle + 1)
+        second=(await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        blocked = await client.put("/physical/sessions/"+second["session_id"]+"/manifest", json=manifest(root), headers=ORIGIN)
+        assert blocked.status_code == 507
+        cancelled = await client.post(route+"/cancel", headers=ORIGIN)
+        assert cancelled.json()["status"] == "cancelled" and not stored.exists()
+        assert (await client.put("/physical/sessions/"+second["session_id"]+"/manifest",
+            json=manifest(root), headers=ORIGIN)).status_code == 200
+        # Abandoned sessions expire, freeing their bytes, the next time a session is created.
+        monkeypatch.setattr(settings, "ghost_physical_pending_ttl_seconds", 60)
+        with store.connect() as db:
+            row = db.execute("SELECT payload FROM records WHERE id=?", (second["session_id"],)).fetchone()
+            stale = json.loads(row[0]); stale["created_at"] = "2020-01-01T00:00:00+00:00"
+            db.execute("UPDATE records SET payload=? WHERE id=?", (json.dumps(stale), second["session_id"]))
+        assert (await client.post("/physical/sessions", json=setup, headers=ORIGIN)).status_code == 201
+        assert (await client.get("/physical/sessions/"+second["session_id"])).json()["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_failed_physical_judge_keeps_evidence_and_can_be_retried(physical_api, fixture_bundle, monkeypatch):
+    app, access, store, settings, token = physical_api
+    from ghost_trials.app import pipeline
+    calls = []
+    class FlakyJudge:
+        async def judge(self, scenario, metrics):
+            calls.append(metrics.evidence_origin)
+            if len(calls) == 1:
+                raise RuntimeError("provider timeout")
+            return JudgeResult(score_category="avoided", confidence=.99, reasoning_trace="Fixture", tier_used="test-fixture-not-real-Nemotron")
+    monkeypatch.setattr(pipeline, "judge", FlakyJudge())
+    for key, value in {"ghost_judge_provider":"nebius", "ghost_live_execution_enabled":True,
+        "ghost_provider_spending_controls_confirmed":True,"ghost_platform_budget_cents":10000,
+        "ghost_live_job_reservation_cents":100}.items(): monkeypatch.setattr(settings, key, value)
+    root, setup, _ = fixture_bundle
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        org = await signin(client, token()); access.accounts.allocate_budget(org, 1000)
+        session = (await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        route = await upload(client, session, root)
+        tid = (await client.post(route+"/validate", headers=ORIGIN)).json()["trial_id"]
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        await pipeline.run(tid)
+        store.job_state(tid, "error")  # what the job runner records for a failed run
+        assert store.trials[tid].status == TrialStatus.ERROR and store.trials[tid].metrics is not None
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        await pipeline.run(tid)
+        assert store.trials[tid].status == TrialStatus.DONE and calls == ["physical", "physical"]
+        # Each attempt is its own reservation; a finished judge is never re-queued.
+        assert access.accounts.budget(org)["used_cents"] == 200
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        assert access.accounts.budget(org)["used_cents"] == 200

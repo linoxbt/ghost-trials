@@ -4,7 +4,14 @@
 set -eu
 root="$(mktemp -d)"
 pids=""
-cleanup() { for pid in $pids; do kill "$pid" 2>/dev/null || true; done; rm -rf "$root"; }
+# Wait for the servers to exit before deleting their data, and never let cleanup change the result.
+cleanup() {
+  status=$?
+  for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+  for pid in $pids; do wait "$pid" 2>/dev/null || true; done
+  rm -rf "$root" 2>/dev/null || { sleep 1; rm -rf "$root" 2>/dev/null || true; }
+  exit "$status"
+}
 trap cleanup EXIT INT TERM
 
 serve() { # name port extra-env...

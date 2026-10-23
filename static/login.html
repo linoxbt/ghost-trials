@@ -36,13 +36,14 @@
             <label for="token">Deployment access token</label>
             <input id="token" name="token" type="password" required autocomplete="current-password">
             <button class="auth-secondary" type="submit">Open private deployment</button>
+            <p id="token-error" class="auth-error" role="alert" hidden></p>
           </form>
         </details>
       </section>
     </main>
     <footer class="auth-footer"><span>GHOST TRIALS · PRIVATE WORKSPACE</span></footer>
   </div>
-  <script src="/assets/login-fallback.js" defer></script>
+  <script src="/assets/login-fallback.js?v=token-error-v1" defer></script>
   <script type="module" src="/assets/auth/login.js"></script>
 </body>
 </html>

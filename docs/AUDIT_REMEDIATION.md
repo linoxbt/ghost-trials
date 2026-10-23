@@ -47,3 +47,19 @@ Old agent records remain readable. Records without source/runtime pinning or usi
 6. **Versioned evidence migration.** Saved pre-pinning CPU records remain readable but cannot be reverified against a changed controller source. This is intentional: the original executable bytes were not retained. The public reference was regenerated; customer records require a fresh execution to obtain current source-pinned evidence.
 
 Do not publish a production-readiness claim until the release blockers are closed and recorded with evidence.
+
+## Second audit — 23 October 2026
+
+A second independent review (backend, frontend, deployment) found no Critical issues. Each fix below has a regression test or browser check.
+
+| Finding | Resolution |
+| --- | --- |
+| A flood of junk sign-in tokens could lock everyone out (platform-wide attempt limit checked before verification) | Credentials are verified first; only failures are counted, so a valid sign-in always succeeds |
+| Cancelled recording uploads kept their bytes; no storage quota | Cancel and expiry delete files; per-workspace and platform storage quotas at manifest time |
+| One person with several workspaces could drain the platform's daily trials | Per-person pending and daily caps across workspaces, also counted when a Hunt is created |
+| CSP was report-only and absent from sign-in pages | One enforced policy for backend and Netlify pages, with a `/csp-report` endpoint |
+| Resume compared a controller digest with itself; restarts re-blocked Hunts; concurrent resumes raced | Live controller digest check, interrupted CPU trials re-run with a new request key, re-check under the lock |
+| Failed physical judge could never be retried | Retry allowed after a failed job, with its own never-refunded reservation |
+| Sign-out left the identity provider signed in | Sign-out ends the Privy/Dynamic session on the login page |
+| "Hunt not found" right after starting a Hunt | New Hunt is shown immediately; forced refreshes are never stale |
+| Other fixes | Owner-only admin changes, maintenance mode for paid agent review, orphaned-job recovery, bounded broadcast and socket caps, streaming upload hashing, reconnect/poll backoff, per-submission idempotency keys, accessibility and copy fixes |

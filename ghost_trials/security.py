@@ -13,6 +13,9 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
 from .accounts import Accounts, Principal
+from .csp import PAGE_CSP
+
+SIGN_IN_PATHS = frozenset({"/auth/session", "/auth/privy/session", "/auth/dynamic/session"})
 
 
 class AccessControl:
@@ -159,12 +162,21 @@ class AccessControl:
             return None if forwarded else (connection.client.host if connection.client else None)
         return forwarded[-hops] if len(forwarded) >= hops else (forwarded[0] if forwarded else None)
 
-    def auth_attempt_allowed(self, request, bucket):
-        """Per-client limit plus a high platform backstop, so one client cannot lock out sign-in."""
+    def auth_failure(self, request, bucket, error):
+        """Count a rejected credential; 429 once the per-client or platform failure budget is spent.
+
+        Only failures are counted and only after verification, so a flood of junk credentials can never
+        turn away a valid sign-in. Signed provider JWTs and 32+ character tokens make guessing infeasible.
+        """
+        if error.status_code != 401:
+            raise error  # provider outages and misconfiguration are not attempts
         client = self.client_ip(request)
-        if client and not self.store.rate_allowed(f"{bucket}:{client}", self.settings.ghost_max_client_auth_attempts_per_minute):
-            return False
-        return self.store.rate_allowed(bucket, self.settings.ghost_max_auth_attempts_per_minute)
+        within = self.store.rate_allowed(f"{bucket}:failed", self.settings.ghost_max_auth_attempts_per_minute)
+        if client:
+            within = self.store.rate_allowed(f"{bucket}:failed:{client}", self.settings.ghost_max_client_auth_attempts_per_minute) and within
+        if not within:
+            raise HTTPException(429, "Too many failed sign-in attempts", headers={"Retry-After": "60"}) from error
+        raise error
 
     def origin_allowed(self, request):
         allowed = {value.strip().rstrip("/") for value in self.settings.ghost_allowed_origins.split(",") if value.strip()}
@@ -174,7 +186,7 @@ class AccessControl:
 
     async def middleware(self, request, call_next):
         path = request.url.path
-        public = path in {"/", "/docs", "/docs/", "/docs/agent", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite"} or path.startswith("/assets/") or path.startswith("/app")
+        public = path in {"/", "/docs", "/docs/", "/docs/agent", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite", "/csp-report"} or path.startswith("/assets/") or path.startswith("/app")
         request.state.principal = self.principal(request)
         if self.enabled and not public:
             role = self.role(request)
@@ -193,6 +205,10 @@ class AccessControl:
             limit = self.settings.ghost_physical_max_chunks_per_minute if physical_chunk else self.settings.ghost_max_requests_per_minute
             if identity:
                 allowed = self.store.rate_allowed(("recording-upload:" if physical_chunk else "mutation:") + identity, limit)
+            elif path in SIGN_IN_PATHS:
+                # Sign-in routes count failed credentials themselves; a shared anonymous bucket here
+                # would let junk requests lock everyone out.
+                allowed = True
             else:
                 client = self.client_ip(request)
                 allowed = ((not client or self.store.rate_allowed("mutation:anonymous:" + client, limit))
@@ -218,4 +234,8 @@ class AccessControl:
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         if not public:
             response.headers["Cache-Control"] = "no-store"
+        # Application pages get the enforced policy; evidence previews keep their own framing rules.
+        if (response.headers.get("content-type", "").startswith("text/html")
+                and not path.startswith(("/artifacts/", "/generated/", "/api/"))):
+            response.headers.setdefault("Content-Security-Policy", PAGE_CSP)
         return response

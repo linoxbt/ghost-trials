@@ -12,6 +12,7 @@ import random
 from pathlib import Path
 
 from .adapters import ExecutionBlocked
+from .durable import individual_subject
 from .hunt import (GhostCase, Hunt, HuntObjective, HuntPlanner, HuntStatus, PolicyVersion, TrialCandidate,
                    SearchSpace, case_from_trial, default_space, empirical_boundary,
                    observed_outcome, reproduction_result)
@@ -62,6 +63,7 @@ class HuntService:
         self.agent_admission = agent_admission or admission
         self.agent_execution_allowed = self.default_agent_execution_allowed
         self.tasks: dict[str, asyncio.Task] = {}
+        self.task_subjects: dict[str, str] = {}
         self.agent_slots = asyncio.Semaphore(2)
 
     def get(self, hunt_id: str) -> Hunt | AgentHunt | None:
@@ -87,18 +89,22 @@ class HuntService:
                 case.boundary = boundary
                 self.store.put_domain("ghost_case", case_id, case.model_dump_json())
 
-    def default_agent_execution_allowed(self, organization_id):
+    def default_agent_execution_allowed(self, organization_id, subject=None):
         if self.store.job_counts()["submitted_today"] + self.store.agent_reservations_today() >= self.settings.ghost_max_jobs_per_day:
             raise HuntStopped("Daily execution budget exhausted")
 
-    def queue_full(self, organization_id) -> bool:
+    def queue_full(self, organization_id, subject=None) -> bool:
         limits = getattr(self.store, "org_job_limits", None)
         org_pending = self.store.org_usage(organization_id)[0] if limits else 0
+        person = getattr(self.store, "subject_job_limits", None)
+        person_pending = (self.store.subject_usage(subject)[0]
+                          if person and individual_subject(subject) else 0)
         return (self.store.job_counts()["pending"] >= self.settings.ghost_max_pending_jobs
-                or (limits is not None and org_pending >= limits[0]))
+                or (limits is not None and org_pending >= limits[0])
+                or (person is not None and person_pending >= person[0]))
 
-    async def wait_for_queue_slot(self, organization_id):
-        while self.queue_full(organization_id):
+    async def wait_for_queue_slot(self, organization_id, subject=None):
+        while self.queue_full(organization_id, subject):
             await asyncio.sleep(1)
 
     async def wait_for_trial(self, trial_id):
@@ -199,6 +205,18 @@ class HuntService:
         active = self.tasks.get(hunt_id)
         return bool(active and not active.done())
 
+    def outstanding_trials(self, organization_id: str, subject: str) -> tuple[int, int]:
+        """Trials that running Hunts may still submit, for this workspace and for this person."""
+        workspace = person = 0
+        for hunt_id, task in self.tasks.items():
+            hunt = None if task.done() else self.get(hunt_id)
+            if hunt is None or isinstance(hunt, AgentHunt):
+                continue
+            left = max(0, hunt.max_trials - sum(1 for candidate in hunt.candidates if candidate.trial_id))
+            workspace += left if hunt.organization_id == organization_id else 0
+            person += left if self.task_subjects.get(hunt_id) == subject else 0
+        return workspace, person
+
     def stored_cases(self, organization_id: str) -> list[GhostCase | AgentGhostCase]:
         """Recorded cases without integrity re-checks; for lookups, not for reporting."""
         return [(AgentGhostCase if json.loads(raw).get("domain") == "ai_agent" else GhostCase).model_validate_json(raw)
@@ -209,7 +227,9 @@ class HuntService:
             raise ValueError("Hunt is already running")
         # Finished tasks are not kept once replaced.
         self.tasks = {key: task for key, task in self.tasks.items() if not task.done()}
+        self.task_subjects = {key: value for key, value in self.task_subjects.items() if key in self.tasks}
         self.tasks[hunt_id] = asyncio.create_task(self.run(hunt_id, subject))
+        self.task_subjects[hunt_id] = subject
 
     async def stop(self):
         pending = [task for task in self.tasks.values() if not task.done()]
@@ -245,16 +265,16 @@ class HuntService:
                 if candidate not in hunt.candidates:
                     hunt.candidates.append(candidate)
                     self.save(hunt)
-                key = f"hunt:{hunt.hunt_id}:{candidate.sequence}"
+                key = f"hunt:{hunt.hunt_id}:{candidate.sequence}" + (f":retry{candidate.attempt}" if candidate.attempt else "")
                 prior = self.store.find_request(key)
                 if prior:
                     candidate.trial_id = prior["id"]
                 if not candidate.trial_id:
                     # A full queue is a reason to wait, not to stop the Hunt.
                     while True:
-                        await self.wait_for_queue_slot(hunt.organization_id)
+                        await self.wait_for_queue_slot(hunt.organization_id, subject)
                         async with self.admission_lock:
-                            if self.queue_full(hunt.organization_id):
+                            if self.queue_full(hunt.organization_id, subject):
                                 continue
                             self.admission()
                             if candidate.phase == "reproduce":
@@ -513,9 +533,10 @@ class HuntService:
                 try:
                     self.agent_admission()
                     if not self.store.get_domain("agent_reservation", trial_id):
-                        self.agent_execution_allowed(hunt.organization_id)
+                        self.agent_execution_allowed(hunt.organization_id, subject)
                         self.store.put_domain("agent_reservation", trial_id, json.dumps({
-                            "organization_id": hunt.organization_id, "hunt_id": hunt.hunt_id, "at": time.time()}))
+                            "organization_id": hunt.organization_id, "subject": subject,
+                            "hunt_id": hunt.hunt_id, "at": time.time()}))
                 finally:
                     self.admission_lock.release()
                 variant, pressure = int(candidate.controls["attack_variant"]), int(candidate.controls["pressure"])

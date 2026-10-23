@@ -46,6 +46,17 @@ const origin='http://127.0.0.1:8013';
   await page.setViewportSize({width:390,height:844});await page.goto(origin+'/app/#/overview');
   await page.getByText(/Real-trial milestone: pending/).waitFor();
   await page.screenshot({path:'/tmp/ghost-evidence-overview-mobile.png',fullPage:true});
+  // Sign-out ends the server session and tells the login page to end the provider session too.
+  await page.setViewportSize({width:1440,height:900});await page.goto(origin+'/app/#/reports');
+  await page.locator('#sessionLogout').click();
+  await page.waitForURL(url=>url.pathname==='/auth/login');
+  assert.equal(new URL(page.url()).searchParams.get('signed_out'),'1');
+  assert.equal((await context.request.get(origin+'/trials')).status(),401);
+  // An expired session returns to the route the person was on after signing in again.
+  await page.goto(origin+'/app/#/reports');
+  await page.waitForURL(url=>url.pathname==='/auth/login');
+  const returned=new URL(page.url());
+  assert.ok(returned.searchParams.get('next')==='#/reports'||returned.hash==='#/reports',returned.href);
   assert.deepEqual(errors,[]);
   console.log('Passed: fixture exclusion, null score, pending real execution, evidence filters/labels, reproducibility download, and 320/390/1440px layout. No paid provider or hardware used.');
  }finally{await browser.close();}
