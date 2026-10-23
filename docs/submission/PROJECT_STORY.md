@@ -34,6 +34,6 @@ The hardest design boundary was separating measurement from interpretation. A ge
 
 ## What we accomplished and what remains
 
-The CPU path executes real physics, discovers and reproduces failures, checks retained evidence and compares compatible controllers. The current live website uses Railway for the FastAPI CPU backend and Netlify for the frontend; the application itself is not hosted on Nebius AI Cloud. A submitted competition demonstration must show a genuine Token Factory runtime call from the verified-trial workflow, not merely configured credentials or a historical API probe.
+The CPU path executes real physics, discovers and reproduces failures, checks retained evidence and compares compatible controllers. The current live website runs the FastAPI CPU backend in Docker on a self-hosted VPS and the frontend on Netlify; the application itself is not hosted on Nebius AI Cloud. A submitted competition demonstration must show a genuine Token Factory runtime call from the verified-trial workflow, not merely configured credentials or a historical API probe.
 
 Next we would validate against a more representative robot/task, gather independently reviewed failure labels, and test a compatible G1 policy on authorized compute. Until then, Ghost Trials should be judged as an evidence-conscious, autonomous **simulated-policy failure hunter**, not as a G1 safety certificate.

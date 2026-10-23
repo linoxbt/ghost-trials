@@ -26,7 +26,7 @@ The smoke command deliberately disables all external model calls. Its artifacts 
 
 ## Deployment and submission checks still required
 
-- Validate sign-in and a fresh CPU Hunt, evidence report, replay, and comparison on the deployed Netlify/Railway release.
+- Validate sign-in and a fresh CPU Hunt, evidence report, replay, and comparison on the deployed Netlify frontend and self-hosted backend.
 - If the team wants to claim runtime NVIDIA-model use in the demonstrated CPU flow, complete one authorized live Nemotron review and retain its response and usage alongside measured trial evidence. Do not call contract tests a live inference demonstration.
 - Have a robotics reviewer inspect the configuration, controller identity, trace, measurement definitions, and repeatability limitations.
 - Record and publish the three-minute-or-shorter demo showing at least one minute of actual key modules operating. Complete owner-specific Devpost fields and confirm hackathon eligibility.

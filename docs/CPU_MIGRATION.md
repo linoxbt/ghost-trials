@@ -35,14 +35,23 @@ For an existing checkout whose private `.env` still selects GPU providers, use `
 
 ### Public CPU backend
 
-The Netlify site is a static frontend backed by the single-replica Railway CPU
-service at `https://ghost-trials-production.up.railway.app`. Both deployment
-and persistent `/data` volume exist; verify `/health` and a signed-in Hunt after
-each release. The service and network usage can incur Railway charges.
+The Netlify site (`https://ghosttrials.site`) is a static frontend whose
+`_redirects` proxy API routes to a single CPU container on a self-hosted VPS at
+`https://backend.ghosttrials.site`. On 22 October 2026 the backend moved there
+from Railway after Railway suspended services; the database started fresh.
+Verify `/health` and a signed-in Hunt after each release.
 
-Before exposing the service, attach persistent storage at `/data` and configure
-the backend with these variables (along with an owner-controlled Railway
-spending limit):
+The VPS layout (`/opt/ghost-trials`):
+
+- `compose.yaml` runs the image built from this repository
+  (`docker build -t ghost-trials-api:<sha> .`), published only on
+  `127.0.0.1:8796`, with `./data:/data`, `cap_drop: ALL` plus the
+  `CHOWN`, `DAC_READ_SEARCH`, `SETUID` and `SETGID` capabilities the entrypoint
+  needs to hand `/data` to UID 10001, and a memory limit.
+- `ghost-trials.env` (mode `600`, never committed) holds the variables below.
+- `data/` holds the SQLite state and evidence artifacts, owned by UID 10001.
+- Caddy terminates TLS with a `backend.ghosttrials.site { reverse_proxy 127.0.0.1:8796 }`
+  site block.
 
 ```dotenv
 GHOST_MODE=cpu
@@ -55,33 +64,39 @@ GHOST_CUSTOMER_AUTH_REQUIRED=true
 GHOST_AUTH_PROVIDER=privy
 PRIVY_APP_ID=<your Privy public app ID>
 GHOST_COOKIE_SECURE=true
-GHOST_ALLOWED_ORIGINS=https://ghosttrials.site,https://ghost-trials.netlify.app,https://<backend-domain>
+GHOST_ALLOWED_ORIGINS=https://ghosttrials.site,https://ghost-trials.netlify.app,https://backend.ghosttrials.site
 GHOST_DATA_PATH=/data/state.sqlite3
 GHOST_ARTIFACT_ROOT=/data/artifacts
-RAILWAY_RUN_UID=0
+GHOST_TRUSTED_PROXY_HOPS=0
 ```
 
 Enable the desired sign-in methods in the connected Privy app and allow the
 Netlify origin. Dynamic remains an alternative identity adapter, not the
 currently used path. Do not set a provider ID for an app you do not own.
 The backend refuses to start with `GHOST_PUBLIC_DEPLOYMENT=true` if individual
-sign-in, secure cookies, or exact HTTPS origins are missing. Railway volumes
-are initially root-owned: set `RAILWAY_RUN_UID=0` for the service. The container
+sign-in, secure cookies, or exact HTTPS origins are missing. The container
 entrypoint assigns its dedicated `/data` mount, then runs FastAPI as UID 10001.
 Keep exactly one replica because the state store uses SQLite and an exclusive
-process lease. Back up the volume off-host. The API refuses to start on Railway
-unless `GHOST_DATA_PATH` and `GHOST_ARTIFACT_ROOT` are under the attached
-volume's `RAILWAY_VOLUME_MOUNT_PATH`, so a detached volume cannot silently lose
-data. Set `GHOST_TRUSTED_PROXY_HOPS` to the number of proxies that append
-`X-Forwarded-For` (verify against a request log before relying on per-client
-sign-in limits); per-workspace caps are `GHOST_MAX_ORG_PENDING_JOBS` and
-`GHOST_MAX_ORG_JOBS_PER_DAY`.
+process lease. Back up `data/` off-host as well as on it.
 
-Keep the Netlify production build variable `GHOST_BACKEND_ORIGIN` pointed at
-the stable Railway origin and redeploy the frontend when static assets change.
-Check that Netlify `/health` returns 200, unauthenticated `/trials` returns 401,
-and an authenticated user can start and inspect a CPU Hunt. A Git push alone
-does not invoke the repository's manual frontend deployment workflow.
+`GHOST_TRUSTED_PROXY_HOPS` is `0` here because Caddy replaces
+`X-Forwarded-For` with the Netlify edge address, so no client address is
+trustworthy; per-client sign-in limits then fall back to the global backstop.
+Set it to the number of proxies that append `X-Forwarded-For` only after
+checking a request log. Per-workspace caps are `GHOST_MAX_ORG_PENDING_JOBS`
+and `GHOST_MAX_ORG_JOBS_PER_DAY`.
+
+To release a new backend build, build a new image tag, update it in
+`compose.yaml`, and run `docker compose up -d`. If you deploy on Railway
+instead, the API still refuses to start unless `GHOST_DATA_PATH` and
+`GHOST_ARTIFACT_ROOT` are under the attached volume's
+`RAILWAY_VOLUME_MOUNT_PATH`.
+
+Keep the Netlify production build variable `GHOST_BACKEND_ORIGIN` set to
+`https://backend.ghosttrials.site` and redeploy the frontend when static assets
+change. Check that Netlify `/health` returns 200, unauthenticated `/trials`
+returns 401, and an authenticated user can start and inspect a CPU Hunt. A Git
+push alone does not invoke the repository's manual frontend deployment workflow.
 
 The active CPU settings are `GHOST_MODE=cpu`, `GHOST_SCENARIO_PROVIDER=cpu`, `GHOST_SIMULATOR_PROVIDER=mujoco_cpu`, `GHOST_JUDGE_PROVIDER=cpu`, `GHOST_EXECUTION_BACKEND=mujoco_cpu`, and `GHOST_POLICY_NAME=gantry-push-v1`. The container entrypoint now defaults to public-deployment safeguards and refuses startup without individual sign-in and exact HTTPS origins. For loopback-only Docker development, explicitly set `GHOST_PUBLIC_DEPLOYMENT=false` and do not publish the port beyond localhost. If an existing `.env` selects production/GPU providers, set the CPU values explicitly in the deployment environment; never publish keys in frontend variables. Persistent data and artifacts should be mounted or backed up. A development server on port 8000 must not be exposed directly.
 

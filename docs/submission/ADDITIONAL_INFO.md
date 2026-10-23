@@ -62,7 +62,7 @@ The repository contains an MIT license and README with development setup, archit
 
 https://ghost-trials.netlify.app/
 
-Editorial note: The static frontend uses a persistent Railway FastAPI CPU backend. Validate sign-in, a fresh CPU Hunt, evidence and replay on the deployed release before submitting. Historical synthetic records remain labeled; the live CPU Hunt is real simulation, not GPU/G1 or physical hardware. Nemotron review is separately gated by operator-approved spending controls.
+Editorial note: The static frontend uses a persistent, self-hosted FastAPI CPU backend (Docker behind Caddy on a VPS). Validate sign-in, a fresh CPU Hunt, evidence and replay on the deployed release before submitting. Historical synthetic records remain labeled; the live CPU Hunt is real simulation, not GPU/G1 or physical hardware. Nemotron review is separately gated by operator-approved spending controls.
 
 ## Which model(s) did you use, and why did you choose that size/variant?
 
