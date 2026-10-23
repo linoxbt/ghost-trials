@@ -16,8 +16,8 @@ if [ "$(id -u)" = 0 ]; then
   # Evidence written by an earlier root process must stay readable and writable by the API user.
   if [ -d /data/artifacts ]; then chown -R 10001:10001 /data/artifacts; fi
   exec setpriv --reuid=10001 --regid=10001 --clear-groups \
-    uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --log-config /app/deployment/logging.json
+    uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --no-server-header --log-config /app/deployment/logging.json
 fi
 
 # One worker only: SQLite state is guarded by a single-process lease.
-exec uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --log-config /app/deployment/logging.json
+exec uvicorn ghost_trials.app:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1 --no-server-header --log-config /app/deployment/logging.json

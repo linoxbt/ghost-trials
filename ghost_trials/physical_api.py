@@ -5,7 +5,8 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -25,14 +26,23 @@ def append_chunk(path, data):
 
 def build_router(settings, store, access, publish, submission_allowed):
     router = APIRouter(prefix="/physical", tags=["Physical recordings (read-only hardware)"])
-    lock = asyncio.Lock()  # session creation and per-organization session limits
-    session_locks: dict[str, asyncio.Lock] = {}
+    lock = asyncio.Lock()  # session creation, storage quotas and per-organization session limits
+    session_locks: dict[str, list] = {}  # session id -> [lock, holders]; dropped when nobody holds it
 
-    def session_lock(session_id: str) -> asyncio.Lock:
+    @asynccontextmanager
+    async def session_lock(session_id: str):
         # One recording's chunked upload or validation never blocks another organization's uploads.
         if not re.fullmatch(r"phy_[a-f0-9]{24}", session_id):
             raise HTTPException(404, "Recording session not found")
-        return session_locks.setdefault(session_id, asyncio.Lock())
+        entry = session_locks.setdefault(session_id, [asyncio.Lock(), 0])
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield
+        finally:
+            entry[1] -= 1
+            if not entry[1]:
+                session_locks.pop(session_id, None)
 
     def principal(request, write=False):
         if write and not access.enabled:
@@ -67,6 +77,29 @@ def build_router(settings, store, access, publish, submission_allowed):
         if store.maintenance():
             raise HTTPException(503, "Recordings paused for maintenance")
 
+    def all_sessions():
+        with store.connect() as db:
+            return [json.loads(row[0]) for row in db.execute("SELECT payload FROM records WHERE kind='physical_session'")]
+
+    async def discard(session, status):
+        """End a pending session and free its uploaded bytes; validated evidence is never deleted here."""
+        session["status"] = status
+        save(session)
+        await asyncio.to_thread(shutil.rmtree, directory(session["session_id"]), True)
+
+    async def expire_stale(sessions):
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.ghost_physical_pending_ttl_seconds)
+        for session in sessions:
+            if (session["status"] in {"awaiting_capture", "uploading"} and session["session_id"] not in session_locks
+                    and datetime.fromisoformat(session["created_at"]) < cutoff):
+                await discard(session, "expired")
+        return sessions
+
+    def stored_bytes(sessions, organization_id=None):
+        # Uploads must match their sealed manifest, so declared bytes bound what is (or will be) on disk.
+        return sum(sum(record["bytes"] for record in s["manifest"].values()) for s in sessions
+                   if s["status"] in {"uploading", "validated"} and organization_id in {None, s["organization_id"]})
+
     @router.get("/capabilities")
     async def capabilities(request: Request):
         principal(request)
@@ -90,8 +123,7 @@ def build_router(settings, store, access, publish, submission_allowed):
         owner = principal(request, True)
         check_mutation()
         async with lock:
-            with store.connect() as db:
-                existing = [json.loads(row[0]) for row in db.execute("SELECT payload FROM records WHERE kind='physical_session'")]
+            existing = await expire_stale(all_sessions())
             pending = [s for s in existing if s["status"] in {"awaiting_capture", "uploading"}]
             if len(pending) >= 10 or sum(s["organization_id"] == owner.organization_id for s in pending) >= 3:
                 raise HTTPException(429, "Too many pending hardware recordings")
@@ -130,8 +162,7 @@ def build_router(settings, store, access, publish, submission_allowed):
             session = load(session_id, request, True)
             if session["status"] not in {"awaiting_capture", "uploading"}:
                 raise HTTPException(409, "Only a pending recording can be cancelled")
-            session["status"] = "cancelled"
-            save(session)
+            await discard(session, "cancelled")
             return session
 
     @router.put("/sessions/{session_id}/manifest")
@@ -142,7 +173,7 @@ def build_router(settings, store, access, publish, submission_allowed):
             raise HTTPException(422, "Invalid file set or recording exceeds bundle limit")
         if body["capture.json"].bytes > 16384 or body["telemetry.jsonl"].bytes > 33554432:
             raise HTTPException(422, "Recording metadata or telemetry exceeds limits")
-        async with session_lock(session_id):
+        async with lock, session_lock(session_id):
             session = load(session_id, request, True)
             wanted = {k: v.model_dump() for k, v in body.items()}
             if session["manifest"] == wanted:
@@ -151,6 +182,10 @@ def build_router(settings, store, access, publish, submission_allowed):
             if (session["status"] != "awaiting_capture" or setup["robot_variant"] != "g1_29dof"
                     or not setup["on_site_operator_confirmed"] or not setup["robot_serial"] or not setup["checkpoint_digest"]):
                 raise HTTPException(409, "Manifest is sealed or robot compatibility is unconfirmed")
+            sessions, size = all_sessions(), sum(record["bytes"] for record in wanted.values())
+            if (stored_bytes(sessions, session["organization_id"]) + size > settings.ghost_physical_org_storage_bytes
+                    or stored_bytes(sessions) + size > settings.ghost_physical_platform_storage_bytes):
+                raise HTTPException(507, "Recording storage quota reached for this workspace or platform")
             session.update(status="uploading", manifest=wanted)
             save(session)
             return session
@@ -252,9 +287,11 @@ def build_router(settings, store, access, publish, submission_allowed):
                 raise HTTPException(503, "A real Nebius judge must be configured")
             submission_allowed()
             original = store.trials[session["trial_id"]]
-            if store.job(original.trial_id):
+            job = store.job(original.trial_id)
+            # A queued, running or finished judge is returned as is; only a failed one may be retried.
+            if job and not (job["state"] == "error" and original.status == TrialStatus.ERROR):
                 return {"trial_id": original.trial_id, "status": original.status}
-            trial = original.model_copy(update={"status": TrialStatus.QUEUED})
+            trial = original.model_copy(update={"status": TrialStatus.QUEUED, "error": None})
             try:
                 store.enqueue_recording_judge(trial, settings.ghost_live_job_reservation_cents,
                                              settings.ghost_platform_budget_cents, owner.subject)

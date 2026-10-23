@@ -1,7 +1,9 @@
 """Persistent serialized queue; no automatic retry of possibly billed operations."""
 import asyncio
 import logging
+import shutil
 import traceback
+from pathlib import Path
 
 from .models import TrialStatus
 
@@ -13,6 +15,7 @@ class JobRunner:
         self.store, self.pipeline, self.settings = store, pipeline, settings
         self.task = None
         self.active = None
+        self.wake = asyncio.Event()
 
     async def recover(self):
         for trial in list(self.store.trials.values()):
@@ -23,11 +26,23 @@ class JobRunner:
                 trial.status = TrialStatus.ERROR
                 trial.error = "Interrupted execution; remote compute may still be active. Review worker before replaying."
                 await self.store.put_trial(trial)
+                # A bundle cut off mid-capture is never evidence; drop it so it cannot be mistaken for one.
+                root = getattr(self.settings, "ghost_artifact_root", None)
+                if root is not None:
+                    shutil.rmtree(Path(root) / "trials" / trial.trial_id, ignore_errors=True)
             if job and job["state"] in {"running", "queued"}:
                 self.store.job_state(trial.trial_id, "done" if trial.status == TrialStatus.DONE else "error")
+        # A job whose trial record could not be loaded would otherwise hold a pending slot forever.
+        for trial_id in getattr(self.store, "pending_job_ids", list)():
+            if trial_id not in self.store.trials:
+                self.store.job_state(trial_id, "error")
+                self.store.audit("job_orphaned", "system", trial_id)
+                logger.error("job_orphaned trial_id=%s", trial_id)
 
     async def loop(self):
         while True:
+            # Cleared before claiming, so a job queued after an empty claim still wakes the next wait.
+            self.wake.clear()
             try:
                 trial_id = self.store.claim()
             except Exception as exc:
@@ -35,7 +50,11 @@ class JobRunner:
                 await asyncio.sleep(1)
                 continue
             if not trial_id:
-                await asyncio.sleep(0.05)
+                # Woken by new submissions; the timeout still catches jobs queued by another process.
+                try:
+                    await asyncio.wait_for(self.wake.wait(), 1.0)
+                except TimeoutError:
+                    pass
                 continue
             self.active = trial_id
             try:
@@ -75,9 +94,17 @@ class JobRunner:
                 self.active = None
 
     def start(self):
+        loop = asyncio.get_running_loop()
+        self.wake = asyncio.Event()  # bound to this loop; the API may be started more than once per process
+
+        def wake():
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(self.wake.set)
+        self.store.on_enqueue = wake
         self.task = asyncio.create_task(self.loop())
 
     async def stop(self):
+        self.store.on_enqueue = None
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)

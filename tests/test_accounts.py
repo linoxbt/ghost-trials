@@ -424,3 +424,64 @@ async def test_dynamic_jwks_refetches_for_rotated_key_after_throttle(tmp_path, m
     accounts.dynamic_jwks_fetched_at -= 31
     assert await accounts.dynamic_verification_key(jwt.encode(claims, new, algorithm='RS256', headers={'kid': 'new'}))
     assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_personal_daily_cap_spans_all_of_a_persons_workspaces(identities, monkeypatch):
+    app, access, store, settings, token = identities
+    monkeypatch.setattr(store, 'org_job_limits', (100, 100))
+    monkeypatch.setattr(store, 'subject_job_limits', (100, 2))
+    origin = {'Origin': 'https://console.test'}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://test') as client:
+        await signin(client, token())
+        body = {'prompt': 'A falling box enters the path'}
+        assert (await client.post('/scenarios', json={**body, 'seed': 1}, headers=origin)).status_code == 202
+        second = (await client.post('/organizations', json={'name': 'Second lab'}, headers=origin)).json()
+        assert (await client.post('/organizations/switch', json=second, headers=origin)).status_code == 200
+        assert (await client.post('/scenarios', json={**body, 'seed': 2}, headers=origin)).status_code == 202
+        # A fresh workspace does not reset the person's allowance.
+        third = (await client.post('/organizations', json={'name': 'Third lab'}, headers=origin)).json()
+        assert (await client.post('/organizations/switch', json=third, headers=origin)).status_code == 200
+        refused = await client.post('/scenarios', json={**body, 'seed': 3}, headers=origin)
+        assert refused.status_code == 429 and 'across your workspaces' in refused.json()['detail']
+
+
+@pytest.mark.asyncio
+async def test_only_the_owner_changes_administrator_seats(identities):
+    app, access, store, settings, token = identities
+    transport = httpx.ASGITransport(app)
+    origin = {'Origin': 'https://console.test'}
+    clients = [httpx.AsyncClient(transport=transport, base_url='http://test') for _ in range(3)]
+    alice, bob, carol = clients
+    try:
+        await signin(alice, token('alice'))
+        await signin(bob, token('bob'))
+        await signin(carol, token('carol'))
+        for member in (bob, carol):
+            invite = (await alice.post('/organizations/current/invitations', json={'role': 'operator'}, headers=origin)).json()['invitation_token']
+            assert (await member.post('/organizations/invitations/accept', json={'token': invite}, headers=origin)).status_code == 200
+        for name in ('bob', 'carol'):
+            assert (await alice.patch(f'/organizations/current/members/did:privy:{name}', json={'role': 'admin'}, headers=origin)).status_code == 200
+        org = (await alice.get('/organizations/current')).json()['id']
+        for member in (bob, carol):
+            assert (await member.post('/organizations/switch', json={'organization_id': org}, headers=origin)).status_code == 200
+        assert (await bob.patch('/organizations/current/members/did:privy:carol', json={'role': 'viewer'}, headers=origin)).status_code == 403
+        assert (await bob.delete('/organizations/current/members/did:privy:carol', headers=origin)).status_code == 403
+        # An admin may still step down themselves, and the owner can change any admin seat.
+        assert (await bob.patch('/organizations/current/members/did:privy:bob', json={'role': 'operator'}, headers=origin)).status_code == 200
+        assert (await alice.patch('/organizations/current/members/did:privy:carol', json={'role': 'viewer'}, headers=origin)).status_code == 200
+    finally:
+        for client in clients:
+            await client.aclose()
+
+
+def test_budget_cli_sets_and_lists_workspace_budgets(identities, monkeypatch, capsys):
+    app, access, store, settings, token = identities
+    from ghost_trials import budget
+    monkeypatch.setattr(budget, "get_settings", lambda: settings)
+    monkeypatch.setattr(settings, "ghost_data_path", store.path)
+    principal = access.accounts.start_session(access.accounts.verify(token()))[1]
+    budget.main(["set", principal.organization_id, "150"])
+    assert access.accounts.budget(principal.organization_id) == {"limit_cents": 150, "used_cents": 0}
+    budget.main(["list"])
+    assert f"{principal.organization_id}\tMy evaluation lab\tlimit=150¢\treserved=0¢" in capsys.readouterr().out

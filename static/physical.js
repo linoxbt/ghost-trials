@@ -35,7 +35,7 @@ async function mountPhysical(){
    const writable=identity.role!=='viewer';form.querySelector('[type=submit]').disabled=!writable;
    root.innerHTML=sessions.length?`<div class="physical-recordings">${sessions.map(s=>`<article class="panel physical-session" data-session="${escapeHtml(s.session_id)}"><div class="panel-header"><div><span class="eyebrow mono">${escapeHtml(s.session_id)}</span><h2>${escapeHtml(s.setup.policy_name)}</h2></div><span class="badge">${escapeHtml(human(s.status))}</span></div><p class="finding">${escapeHtml(s.setup.prompt)}</p><dl class="metadata"><div><dt>Robot</dt><dd>${escapeHtml(s.setup.robot_serial||'Waiting for hardware access')}</dd></div><div><dt>Checkpoint</dt><dd><code>${escapeHtml(s.setup.checkpoint_digest||'Not available yet')}</code></dd></div><div><dt>Provenance</dt><dd>Operator-declared · not independently attested</dd></div></dl>
    ${s.status==='validated'?`<div class="physical-video"><video src="/physical/sessions/${encodeURIComponent(s.session_id)}/artifacts/response.mp4" controls playsinline preload="metadata" aria-label="Uploaded physical robot recording"></video></div>`:''}
-   <div class="physical-actions"><button class="button small" data-setup>Download setup</button>${writable&&s.status==='awaiting_capture'?'<button class="button small" data-edit>Edit setup</button>':''}${writable&&['awaiting_capture','uploading'].includes(s.status)?`<label class="button small">Select recording files<input type="file" data-files multiple accept=".mp4,.json,.jsonl" hidden></label><button class="button small" data-cancel>Cancel session</button>`:''}${s.trial_id?`<a class="button small" href="#/trials/${encodeURIComponent(s.trial_id)}">Inspect flight record ↗</a>${writable?'<button class="button small" data-judge>Request real judge</button>':''}`:''}</div><p class="tip" data-upload-status>${s.verification?'Video decoded and measurements checked. This is not hardware attestation or safety certification.':s.status==='cancelled'?'Session cancelled; existing artifacts retained privately.':'Awaiting recording. No robot footage or metrics have been generated.'}</p></article>`).join('')}</div>`:empty('No physical recordings yet','Prepare a session while you arrange robot access. We do not fabricate hardware footage.');
+   <div class="physical-actions"><button class="button small" data-setup>Download setup</button>${writable&&s.status==='awaiting_capture'?'<button class="button small" data-edit>Edit setup</button>':''}${writable&&['awaiting_capture','uploading'].includes(s.status)?`<button type="button" class="button small" data-pick-files>Select recording files</button><input type="file" data-files multiple accept=".mp4,.json,.jsonl" hidden aria-label="Recording files"><button class="button small" data-cancel>Cancel session</button>`:''}${s.trial_id?`<a class="button small" href="#/trials/${encodeURIComponent(s.trial_id)}">Inspect flight record ↗</a>${writable?'<button class="button small" data-judge>Request real judge</button>':''}`:''}</div><p class="tip" data-upload-status>${s.verification?'Video decoded and measurements checked. This is not hardware attestation or safety certification.':s.status==='cancelled'?'Session cancelled; existing artifacts retained privately.':'Awaiting recording. No robot footage or metrics have been generated.'}</p></article>`).join('')}</div>`:empty('No physical recordings yet','Prepare a session while you arrange robot access. We do not fabricate hardware footage.');
    for(const card of root.querySelectorAll('[data-session]')){
     const s=sessions.find(s=>s.session_id===card.dataset.session);
     card.querySelector('[data-setup]').onclick=()=>download(s,`${s.session_id}-setup.json`);
@@ -43,8 +43,9 @@ async function mountPhysical(){
      physicalEditing=s.session_id;for(const [id,key] of [['physicalPrompt','prompt'],['physicalPolicy','policy_name'],['physicalSerial','robot_serial'],['physicalVariant','robot_variant'],['physicalDigest','checkpoint_digest'],['physicalHazard','hazard_type'],['physicalSeverity','severity']])$('#'+id).value=s.setup[key]||'';
      $('#physicalOperator').checked=s.setup.on_site_operator_confirmed;form.querySelector('[type=submit]').textContent='Save capture setup';form.scrollIntoView({behavior:'smooth'});
     };
-    const fileInput=card.querySelector('[data-files]');if(fileInput)fileInput.onchange=()=>upload(s,card,fileInput.files);
-    const cancel=card.querySelector('[data-cancel]');if(cancel)cancel.onclick=async()=>{try{await json(`/physical/sessions/${s.session_id}/cancel`,{method:'POST'});await reload();}catch(e){notify(e.message);}};
+    // A real button opens the hidden picker, so selecting files works from the keyboard too.
+    const fileInput=card.querySelector('[data-files]'),pick=card.querySelector('[data-pick-files]');if(fileInput){fileInput.onchange=()=>upload(s,card,fileInput.files);pick.onclick=()=>fileInput.click();}
+    const cancel=card.querySelector('[data-cancel]');if(cancel)cancel.onclick=async()=>{if(!confirm('Cancel this recording session? Its uploaded files are deleted.'))return;try{await json(`/physical/sessions/${s.session_id}/cancel`,{method:'POST'});await reload();}catch(e){notify(e.message);}};
     const judge=card.querySelector('[data-judge]');if(judge)judge.onclick=async()=>{
      if(!confirm('Request real Nemotron inference on this uploaded recording? Token Factory charges may apply. Hardware provenance remains unverified.'))return;
      judge.disabled=true;try{const result=await json(`/physical/sessions/${s.session_id}/judge`,{method:'POST'});location.hash=`#/trials/${result.trial_id}`;}catch(e){notify(e.message);judge.disabled=false;}
@@ -53,13 +54,13 @@ async function mountPhysical(){
   }catch(e){if(root.isConnected)root.textContent=e.message;}
  }
  async function upload(session,card,files){
-  const status=card.querySelector('[data-upload-status]'),input=card.querySelector('[data-files]');input.disabled=true;
+  const status=card.querySelector('[data-upload-status]'),input=card.querySelector('[data-files]'),pick=card.querySelector('[data-pick-files]');input.disabled=true;if(pick)pick.disabled=true;
   try{
    if(files.length!==3||new Set([...files].map(f=>f.name)).size!==3||[...files].some(f=>!['response.mp4','telemetry.jsonl','capture.json'].includes(f.name)))throw new Error('Select exactly response.mp4, telemetry.jsonl and capture.json.');
    if(session.setup.robot_variant!=='g1_29dof'||!session.setup.on_site_operator_confirmed||!session.setup.robot_serial||!session.setup.checkpoint_digest)throw new Error('Edit setup to confirm hardware compatibility, the on-site operator, serial and checkpoint before uploading.');
    const limits=await json('/physical/capabilities');if([...files].reduce((a,f)=>a+f.size,0)>limits.maximum_bundle_bytes)throw new Error('Recording exceeds the allowed bundle size.');
    const manifest={};status.textContent='Calculating recording checksums…';
-   for(const f of files){const hash=await crypto.subtle.digest('SHA-256',await f.arrayBuffer());manifest[f.name]={bytes:f.size,sha256:[...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('')};}
+   for(const f of files)manifest[f.name]={bytes:f.size,sha256:await sha256File(f)};
    const current=await json(`/physical/sessions/${session.session_id}/manifest`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(manifest)});
    for(const file of files){let start=current.uploads[file.name]?.received_bytes||0;
     while(start<file.size){const end=Math.min(start+262144,file.size);status.textContent=`Uploading ${file.name} · ${Math.round(start/file.size*100)}%`;
@@ -69,7 +70,7 @@ async function mountPhysical(){
      for(let attempt=0;attempt<4;attempt++){
       const response=await fetch(url,options);
       if(response.status===429&&attempt<3){const seconds=Math.max(1,Math.min(60,Number(response.headers.get('Retry-After'))||60));status.textContent=`Upload paused for ${seconds}s to respect request limits. Your progress is retained.`;await new Promise(resolve=>setTimeout(resolve,seconds*1000));continue;}
-      if(response.status===401){location.assign('/auth/login');throw new Error('Sign in again, then reselect these files to resume.');}
+      if(response.status===401){location.assign(signInUrl());throw new Error('Sign in again, then reselect these files to resume.');}
       result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:`Upload failed (${response.status}). Reselect the same files to resume.`);break;
      }
      if(!result)throw new Error('Upload request limit reached. Reselect these files later to resume.');
@@ -87,7 +88,7 @@ async function mountPhysical(){
     if(!validated)throw new Error('Validation did not finish. Check the recording and select Validate again.');
    }
    notify('Recording validated. No paid judge was called.');await refresh(true);if(root.isConnected)await reload();
-  }catch(e){status.textContent=e.message;}finally{input.disabled=false;}
+  }catch(e){status.textContent=e.message;}finally{input.disabled=false;if(pick)pick.disabled=false;}
  }
  await reload();
 }

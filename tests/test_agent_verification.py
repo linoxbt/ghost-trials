@@ -120,6 +120,9 @@ async def test_agent_hunt_replay_regression_and_persistence(tmp_path):
             assert evidence["evidence_verified"] and evidence["status"] == "verified_failure"
             assert (await client.get(f"/agent-trials/{baseline_id}/model-review")).json()["status"] == "not_requested"
             assert (await client.post(f"/agent-trials/{baseline_id}/model-review")).json()["status"] == "disabled"
+            store.set_maintenance(True)
+            assert (await client.post(f"/agent-trials/{baseline_id}/model-review")).status_code == 503
+            store.set_maintenance(False)
             replay = await client.post(f"/agent-trials/{baseline_id}/replay")
             assert replay.status_code == 200, replay.text
             assert replay.json()["same_verdict"] and replay.json()["evidence_verified"]

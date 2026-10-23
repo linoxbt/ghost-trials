@@ -52,7 +52,7 @@ main{padding:34px 36px 42px;width:100%;max-width:1600px;margin:0 auto;flex:1}.pa
 @media(max-width:620px){.account-avatar{display:grid}.topbar-right .button span{display:none}.topbar-right .button{min-width:34px}.account-hero{padding:18px}.account-hero h2{font-size:21px}}
 
 /* Viewer role: hide controls the server would reject with "Read-only role". */
-.read-only-role [data-case-replay],.read-only-role [data-case-regress],.read-only-role [data-agent-replay],.read-only-role [data-agent-regress],.read-only-role [data-hunt-resume],.read-only-role [data-guided-hunt],.read-only-role [data-cancel-trial],.read-only-role #huntForm [type=submit],.read-only-role #agentHuntForm [type=submit],.read-only-role [data-replay]{display:none!important}
+.read-only-role [data-case-replay],.read-only-role [data-case-regress],.read-only-role [data-agent-replay],.read-only-role [data-agent-regress],.read-only-role [data-hunt-resume],.read-only-role [data-guided-hunt],.read-only-role [data-cancel-trial],.read-only-role #huntForm [type=submit],.read-only-role #agentHuntForm [type=submit],.read-only-role [data-replay],.read-only-role #scenarioForm [type=submit],.read-only-role #requestAgentReview{display:none!important}
 
 /* The breadcrumb yields space first so the top bar never exceeds narrow viewports. */
 .breadcrumb{min-width:0;overflow:hidden}.breadcrumb>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar-right{flex-shrink:0}
@@ -65,3 +65,5 @@ main,#content{min-width:0}.preview-grid{grid-template-columns:repeat(2,minmax(0,
 /* Animate the margin only for a desktop sidebar collapse; crossing into the phone layout snaps
    immediately instead of overflowing for 200ms while the sidebar margin animates away. */
 @media(min-width:901px){.app-shell{transition:margin .2s}}
+/* Hidden until the session check answers; revealed after 3s regardless, in case scripts never load. */
+body.session-pending .app-shell,body.session-pending .sidebar{visibility:hidden;animation:session-reveal 0s 3s forwards}@keyframes session-reveal{to{visibility:visible}}

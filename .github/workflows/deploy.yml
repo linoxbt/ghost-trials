@@ -69,8 +69,11 @@ jobs:
               exit 1
             fi
           done
+      - name: Install the Netlify CLI
+        # Installed before the token exists in any step, with lifecycle scripts disabled.
+        run: npm install --no-save --no-audit --no-fund --ignore-scripts --prefix "$RUNNER_TEMP/netlify" netlify-cli@23.6.0
       - name: Deploy
-        # The token is visible to this step only, never to dependency install scripts.
+        # The token is visible to this step only, and only to the pinned CLI installed above.
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
@@ -79,4 +82,4 @@ jobs:
             echo "NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID must be set in the production environment" >&2
             exit 1
           fi
-          npx --yes netlify-cli@23.6.0 deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"
+          "$RUNNER_TEMP/netlify/node_modules/.bin/netlify" deploy --prod --no-build --dir netlify-dist --site "$NETLIFY_SITE_ID"

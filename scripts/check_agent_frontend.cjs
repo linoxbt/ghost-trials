@@ -46,9 +46,13 @@ async function main(){
     assert.equal(await page.locator('#huntDomain').inputValue(),'ai_agent');
     assert.equal(await page.locator('#agentHuntForm').isVisible(),true);
     assert.equal(await page.locator('#huntForm').isVisible(),false);
+    // The target list comes from the server, including the timeout-test agent.
+    assert.equal(await page.locator('#agentHuntForm [name=target_id] option').count(),3);
     await page.locator('#agentHuntForm [name=max_trials]').fill('6');
     await page.locator('#agentHuntForm button[type=submit]').click();
     await page.waitForURL('**/#/hunt/hunt_*');
+    // A just-created Hunt is shown at once, never "not found" while the list catches up.
+    assert.equal(await page.getByText('Hunt not found').count(),0);
     await page.getByText('VERIFIED FAILURE FOUND').waitFor({timeout:30000});
     await page.getByRole('link',{name:/Inspect trace/}).first().click();
     await page.getByRole('heading',{name:'Deterministic assertions'}).waitFor();

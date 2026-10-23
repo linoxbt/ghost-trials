@@ -314,8 +314,14 @@ class Accounts:
             owner = db.execute("SELECT owner FROM organizations WHERE id=?", (principal.organization_id,)).fetchone()
             if owner and subject == owner[0]:
                 raise HTTPException(409, "The workspace owner cannot be removed or demoted")
-            if not db.execute("SELECT 1 FROM members WHERE subject=? AND organization_id=?", (subject, principal.organization_id)).fetchone():
+            member = db.execute("SELECT role FROM members WHERE subject=? AND organization_id=?", (subject, principal.organization_id)).fetchone()
+            if not member:
                 raise HTTPException(404, "Member not found")
+            # Admins cannot take over a workspace from each other: only the owner changes admin seats
+            # (an admin may still step down or leave on their own).
+            if ((member[0] == "admin" or role == "admin") and subject != principal.subject
+                    and not (owner and principal.subject == owner[0])):
+                raise HTTPException(403, "Only the workspace owner can change administrators")
             if role:
                 db.execute("UPDATE members SET role=? WHERE subject=? AND organization_id=?", (role, subject, principal.organization_id))
             else:

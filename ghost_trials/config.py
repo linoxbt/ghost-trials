@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     ghost_max_jobs_per_day: int = Field(default=300, ge=1, le=100000)
     ghost_max_org_pending_jobs: int = Field(default=2, ge=1, le=1000)
     ghost_max_org_jobs_per_day: int = Field(default=40, ge=1, le=10000)
+    # One person across all of their workspaces, so self-service sign-up cannot drain the platform cap.
+    ghost_max_subject_pending_jobs: int = Field(default=2, ge=1, le=1000)
+    ghost_max_subject_jobs_per_day: int = Field(default=60, ge=1, le=10000)
     ghost_max_requests_per_minute: int = Field(default=60, ge=1, le=10000)
     ghost_max_anonymous_requests_per_minute: int = Field(default=600, ge=1, le=100000)
     ghost_max_client_auth_attempts_per_minute: int = Field(default=10, ge=1, le=1000)
@@ -92,6 +95,9 @@ class Settings(BaseSettings):
     ghost_provider_spending_controls_confirmed: bool = False
     ghost_physical_max_bundle_bytes: int = Field(default=268435456, ge=1048576, le=1073741824)
     ghost_physical_disk_reserve_bytes: int = Field(default=1073741824, ge=10485760)
+    ghost_physical_org_storage_bytes: int = Field(default=1073741824, ge=1048576)
+    ghost_physical_platform_storage_bytes: int = Field(default=4294967296, ge=1048576)
+    ghost_physical_pending_ttl_seconds: int = Field(default=86400, ge=60)
     ghost_physical_max_chunks_per_minute: int = Field(default=240, ge=1, le=2000)
 
 

@@ -119,6 +119,7 @@ class TrialCandidate(BaseModel):
     controls: dict[str, float]
     seed: int = Field(ge=0, le=2_147_483_647)
     trial_id: str | None = None
+    attempt: int = Field(default=0, ge=0, le=10)  # re-run of the same candidate after an interrupted trial
     outcome: Literal["pass", "near_failure", "failure", "provider_error", "insufficient_evidence"] | None = None
     evidence_class: str | None = None
     simulator_version: str | None = None

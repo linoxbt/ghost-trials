@@ -81,10 +81,25 @@ process lease. Back up `data/` off-host as well as on it.
 
 `GHOST_TRUSTED_PROXY_HOPS` is `0` here because Caddy replaces
 `X-Forwarded-For` with the Netlify edge address, so no client address is
-trustworthy; per-client sign-in limits then fall back to the global backstop.
-Set it to the number of proxies that append `X-Forwarded-For` only after
-checking a request log. Per-workspace caps are `GHOST_MAX_ORG_PENDING_JOBS`
-and `GHOST_MAX_ORG_JOBS_PER_DAY`.
+trustworthy. That is safe for sign-in: credentials are verified first and only
+failures are counted, so a flood of junk tokens can return 429 to itself but
+never blocks a valid sign-in. Set the value to the number of proxies that append
+`X-Forwarded-For` only after checking a request log. Trial admission is capped
+per workspace (`GHOST_MAX_ORG_PENDING_JOBS`, `GHOST_MAX_ORG_JOBS_PER_DAY`) and per
+signed-in person across all of their workspaces (`GHOST_MAX_SUBJECT_PENDING_JOBS`,
+`GHOST_MAX_SUBJECT_JOBS_PER_DAY`), under the platform caps.
+
+Pages from both the backend and Netlify carry an enforced Content Security
+Policy (`ghost_trials/csp.py`, Privy's published origins); browsers report
+violations to `/csp-report`, which logs only the directive and blocked host.
+Physical recording uploads are bounded per workspace and platform-wide
+(`GHOST_PHYSICAL_*_STORAGE_BYTES`); cancelled or abandoned sessions are deleted.
+
+Review budgets: `python -m ghost_trials.budget list` and
+`python -m ghost_trials.budget set <organization_id> <cents>`, run inside the
+container as UID 10001. A nightly cron job (`/opt/ghost-trials/backup.sh`) keeps
+seven days of consistent online database snapshots and artifact archives on the
+host; copy them off-host for real disaster recovery.
 
 To release a new backend build, build a new image tag, update it in
 `compose.yaml`, and run `docker compose up -d`. If you deploy on Railway

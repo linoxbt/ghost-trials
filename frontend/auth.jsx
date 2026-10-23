@@ -1,6 +1,7 @@
 import React, {useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {PrivyProvider,useLinkAccount,useLoginWithPasskey,usePrivy,useSignupWithPasskey} from '@privy-io/react-auth';
+import {clearSignedOut,destination,signedOut} from './after_sign_in.js';
 
 async function api(path,body){
   const response=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',
@@ -21,6 +22,8 @@ function SignIn({methods,passkeySignupEnabled}){
     onSuccess:()=>setPasskeyNotice('Passkey created for this account. You can use it to sign in next time.'),
     onError:(err)=>setError(typeof err==='string'?err:err.message),
   });
+  // Signing out of the workspace also ends the Privy session, so the next visitor must sign in again.
+  useEffect(()=>{if(ready&&signedOut()){if(authenticated)void logout().finally(clearSignedOut);else clearSignedOut();}},[ready,authenticated]);
   const passkeyEnabled=methods.includes('passkey');
   const passkeyBusy=['generating-challenge','awaiting-passkey','submitting-response'].includes(passkeyLogin.status)||
     ['generating-challenge','awaiting-passkey','submitting-response'].includes(passkeySignup.status);
@@ -45,13 +48,13 @@ function SignIn({methods,passkeySignupEnabled}){
           throw new Error(`${err.message} You are signed in: select Open workspace to continue, or ask for a new invitation.`);
         }
         await api('/organizations/switch',{organization_id:result.organization_id});}
-      location.replace(new URLSearchParams(location.search).get('manage')==='passkey'?'/app/#/account':'/app/');
+      location.replace(destination());
     }catch(err){setError(err.message);setBusy(false);}
   }
   const emailEnabled=methods.includes('email');
   const googleEnabled=methods.includes('google');
   return <>
-    {authenticated?<><button className="auth-primary" disabled={busy||!ready} onClick={enter}>{busy?'Opening workspace…':'Open workspace →'}</button>
+    {authenticated&&!signedOut()?<><button className="auth-primary" disabled={busy||!ready} onClick={enter}>{busy?'Opening workspace…':'Open workspace →'}</button>
       {passkeyEnabled&&<button className="auth-secondary" disabled={!ready||busy} onClick={()=>void beginPasskey(()=>linkPasskey({name:'Ghost Trials'}))}>Create a passkey for this account</button>}
       <button className="auth-text-button" disabled={busy} onClick={()=>logout()}>Use a different account</button></>:
       <div className="auth-methods">
