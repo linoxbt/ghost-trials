@@ -26,7 +26,7 @@ This pitch is within the 200-character field shown in the supplied form.
 
 Public source: [Ghost Trials on GitHub](https://github.com/linoxbt/ghost-trials).
 
-Hosted application: [Ghost Trials](https://ghost-trials.netlify.app/). The FastAPI CPU backend runs on Railway. Sign in with the site's existing Privy flow to start a Hunt.
+Hosted application: [Ghost Trials](https://ghosttrials.site/). The FastAPI CPU backend runs in Docker behind Caddy on a self-hosted VPS (`https://backend.ghosttrials.site`). Sign in with the site's existing Privy flow to start a Hunt.
 
 Before submission, test sign-in and a fresh Hunt through the hosted site on desktop and mobile. New users receive isolated workspaces; historical fixtures remain explicitly labeled. The optional Nebius reviewer must be enabled under a confirmed spending control and shown in a genuine verified trial before claiming runtime model use. Do not paste account secrets or shared administrator tokens into the public story.
 
