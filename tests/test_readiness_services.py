@@ -406,6 +406,13 @@ def test_netlify_build_enforces_the_shared_csp(tmp_path, monkeypatch):
     assert f"Content-Security-Policy: {PAGE_CSP}" in build.HEADERS and "Report-Only" not in build.HEADERS
     landing = (build.SOURCE / "landing.html").read_text()
     assert "<script>" not in landing, "inline scripts would be blocked by the enforced CSP"
+    # Every external stylesheet or script a page loads must be allowed, or the enforced policy breaks it.
+    import re
+    from urllib.parse import urlsplit
+    for page in build.SOURCE.glob("*.html"):
+        for url in re.findall(r'(?:href|src)="(https://[^"]+)"', page.read_text()):
+            origin = "https://" + urlsplit(url).netloc
+            assert origin in PAGE_CSP or not url.endswith((".js", ".css")) and "css" not in url, (page.name, url)
 
 
 @pytest.mark.asyncio
