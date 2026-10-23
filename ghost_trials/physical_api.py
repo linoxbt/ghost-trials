@@ -82,17 +82,26 @@ def build_router(settings, store, access, publish, submission_allowed):
             return [json.loads(row[0]) for row in db.execute("SELECT payload FROM records WHERE kind='physical_session'")]
 
     async def discard(session, status):
-        """End a pending session and free its uploaded bytes; validated evidence is never deleted here."""
+        """End a session and free its uploaded bytes (cancel, expiry, or an explicit delete)."""
         session["status"] = status
         save(session)
         await asyncio.to_thread(shutil.rmtree, directory(session["session_id"]), True)
+
+    def stored(session_id):
+        with store.connect() as db:
+            row = db.execute("SELECT payload FROM records WHERE kind='physical_session' AND id=?", (session_id,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     async def expire_stale(sessions):
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.ghost_physical_pending_ttl_seconds)
         for session in sessions:
             if (session["status"] in {"awaiting_capture", "uploading"} and session["session_id"] not in session_locks
                     and datetime.fromisoformat(session["created_at"]) < cutoff):
-                await discard(session, "expired")
+                # Re-read first: the snapshot may be stale, and validated evidence must never be expired.
+                current = stored(session["session_id"])
+                if current and current["status"] in {"awaiting_capture", "uploading"}:
+                    await discard(current, "expired")
+                    session.update(current)
         return sessions
 
     def stored_bytes(sessions, organization_id=None):
@@ -165,6 +174,22 @@ def build_router(settings, store, access, publish, submission_allowed):
             await discard(session, "cancelled")
             return session
 
+    @router.delete("/sessions/{session_id}")
+    async def delete(session_id: str, request: Request):
+        """Delete a validated recording's files to free its storage quota; the trial record stays as history."""
+        owner = principal(request, True)
+        async with session_lock(session_id):
+            session = load(session_id, request, True)
+            if session["status"] != "validated":
+                raise HTTPException(409, "Only a validated recording can be deleted; cancel a pending one instead")
+            job = store.job(session["trial_id"]) if session["trial_id"] else None
+            if job and job["state"] in {"queued", "running"}:
+                raise HTTPException(409, "A judge is still queued or running for this recording")
+            await discard(session, "deleted")
+            store.audit("physical_recording_deleted", owner.role, session_id,
+                        organization_id=owner.organization_id, subject=owner.subject)
+            return session
+
     @router.put("/sessions/{session_id}/manifest")
     async def manifest(session_id: str, body: dict[str, FileManifest], request: Request):
         principal(request, True)
@@ -173,7 +198,8 @@ def build_router(settings, store, access, publish, submission_allowed):
             raise HTTPException(422, "Invalid file set or recording exceeds bundle limit")
         if body["capture.json"].bytes > 16384 or body["telemetry.jsonl"].bytes > 33554432:
             raise HTTPException(422, "Recording metadata or telemetry exceeds limits")
-        async with lock, session_lock(session_id):
+        # Own session first, then the platform lock: waiting on a busy session never blocks other uploads.
+        async with session_lock(session_id), lock:
             session = load(session_id, request, True)
             wanted = {k: v.model_dump() for k, v in body.items()}
             if session["manifest"] == wanted:
@@ -288,8 +314,8 @@ def build_router(settings, store, access, publish, submission_allowed):
             submission_allowed()
             original = store.trials[session["trial_id"]]
             job = store.job(original.trial_id)
-            # A queued, running or finished judge is returned as is; only a failed one may be retried.
-            if job and not (job["state"] == "error" and original.status == TrialStatus.ERROR):
+            # A queued, running or finished judge is returned as is; a failed or cancelled one may be retried.
+            if job and not (job["state"] in {"error", "cancelled"} and original.status == TrialStatus.ERROR):
                 return {"trial_id": original.trial_id, "status": original.status}
             trial = original.model_copy(update={"status": TrialStatus.QUEUED, "error": None})
             try:

@@ -5,6 +5,7 @@ Run it where the API's database lives (inside the container on the VPS):
     python -m ghost_trials.budget set <organization_id> <cents>
 """
 import argparse
+import os
 
 from .accounts import Accounts
 from .config import get_settings
@@ -18,7 +19,11 @@ def main(argv=None) -> None:
     allocate = commands.add_parser("set", help="set one workspace's review budget limit (never below what is reserved)")
     allocate.add_argument("organization_id")
     allocate.add_argument("cents", type=int)
+    parser.add_argument("--allow-root", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # As root, SQLite could create root-owned -wal/-shm files that the API (UID 10001) cannot write.
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and not args.allow_root:
+        parser.error("run as the API's user, e.g. docker exec -u 10001 ... python -m ghost_trials.budget")
     settings = get_settings()
     accounts = Accounts(DurableStore(settings.ghost_data_path), settings)
     if args.command == "set":

@@ -9,7 +9,10 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from ghost_trials.csp import PAGE_CSP  # noqa: E402  (dependency-free module shared with the backend)
+from ghost_trials.csp import page_csp  # noqa: E402  (dependency-free module shared with the backend)
+
+# Must match the backend's GHOST_AUTH_PROVIDER so the sign-in provider's origins are allowed.
+PAGE_CSP = page_csp(os.environ.get("GHOST_AUTH_PROVIDER", "privy"))
 
 SOURCE = ROOT / "static"
 TARGET = ROOT / "netlify-dist"

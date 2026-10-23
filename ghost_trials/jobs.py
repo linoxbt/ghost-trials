@@ -27,9 +27,11 @@ class JobRunner:
                 trial.error = "Interrupted execution; remote compute may still be active. Review worker before replaying."
                 await self.store.put_trial(trial)
                 # A bundle cut off mid-capture is never evidence; drop it so it cannot be mistaken for one.
+                # A finished bundle (verification.json is written last) is kept for the operator to review.
                 root = getattr(self.settings, "ghost_artifact_root", None)
-                if root is not None:
-                    shutil.rmtree(Path(root) / "trials" / trial.trial_id, ignore_errors=True)
+                bundle = Path(root) / "trials" / trial.trial_id if root is not None else None
+                if bundle is not None and bundle.is_dir() and not (bundle / "verification.json").exists():
+                    shutil.rmtree(bundle, ignore_errors=True)
             if job and job["state"] in {"running", "queued"}:
                 self.store.job_state(trial.trial_id, "done" if trial.status == TrialStatus.DONE else "error")
         # A job whose trial record could not be loaded would otherwise hold a pending slot forever.

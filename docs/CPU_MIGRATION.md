@@ -93,7 +93,8 @@ Pages from both the backend and Netlify carry an enforced Content Security
 Policy (`ghost_trials/csp.py`, Privy's published origins); browsers report
 violations to `/csp-report`, which logs only the directive and blocked host.
 Physical recording uploads are bounded per workspace and platform-wide
-(`GHOST_PHYSICAL_*_STORAGE_BYTES`); cancelled or abandoned sessions are deleted.
+(`GHOST_PHYSICAL_*_STORAGE_BYTES`); cancelled or abandoned sessions are deleted, and a validated
+recording's files can be deleted from the Physical page to free its quota.
 
 Review budgets: `python -m ghost_trials.budget list` and
 `python -m ghost_trials.budget set <organization_id> <cents>`, run inside the

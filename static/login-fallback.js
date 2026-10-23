@@ -14,3 +14,7 @@ if(tokenError){
  line.hidden=false;
  const team=document.getElementById('private-team');team.hidden=false;team.open=true;
 }
+
+// The token form returns to the same workspace route as the provider sign-in (the server validates it).
+const tokenNext=document.getElementById('token-next');
+if(tokenNext)tokenNext.value=new URLSearchParams(location.search).get('next')||(location.hash.startsWith('#/')?location.hash:'');

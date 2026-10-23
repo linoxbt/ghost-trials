@@ -92,8 +92,9 @@ class CertificationPipeline:
                 root = self.physical_settings.ghost_artifact_root / "physical" / trial.physical_session_id
                 metrics, verification = await asyncio.to_thread(verify_recording, root,
                     RecordingSetup.model_validate(session["setup"]), session["manifest"])
-                metrics.simulation_video_url = trial.metrics.simulation_video_url
-                metrics.trace_url = trial.metrics.trace_url
+                # Rebuilt from the session, so a retry works even after a failure cleared the metrics.
+                metrics.simulation_video_url = f"/physical/sessions/{trial.physical_session_id}/artifacts/response.mp4"
+                metrics.trace_url = f"/physical/sessions/{trial.physical_session_id}/artifacts/telemetry.jsonl"
                 trial.metrics = metrics
                 trial.evidence_verification = verification
                 await self._score(trial, scenario)

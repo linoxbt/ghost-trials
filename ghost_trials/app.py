@@ -285,6 +285,8 @@ async def auth_configuration():
 @app.post("/csp-report", status_code=204)
 async def csp_report(request: Request):
     """Browser CSP violation reports: logged as directive and blocked origin only, never the full URL."""
+    if not access.failures.hit("csp-report", 120):
+        return Response(status_code=204)  # logging is capped in memory; nothing is stored
     try:
         report = json.loads(await request.body() or b"{}")
         report = report.get("csp-report", report) if isinstance(report, dict) else {}
@@ -442,25 +444,34 @@ async def login(request: Request):
         raise HTTPException(403, "Untrusted request origin")
     from urllib.parse import parse_qs
     form = not request.headers.get("content-type", "").startswith("application/json")
+    next_route = ""
     try:
         if not form:
             token = (await request.json()).get("token", "")
         else:
-            token = parse_qs((await request.body()).decode()).get("token", [""])[0]
+            fields = parse_qs((await request.body()).decode())
+            token = fields.get("token", [""])[0]
+            # Only workspace hash routes, so the return route cannot become an open redirect.
+            candidate = fields.get("next", [""])[0]
+            next_route = candidate if re.fullmatch(r"#/[\w\-./?=&%]{0,200}", candidate) else ""
     except (ValueError, AttributeError):
         raise HTTPException(400, "Invalid login request")
+    if access.guessing_blocked(request, "login"):
+        if form:
+            return RedirectResponse("/auth/login?token_error=rate", status_code=303)
+        raise HTTPException(429, "Too many failed sign-in attempts", headers={"Retry-After": "60"})
     role = access.token_role(token) if isinstance(token, str) else None
     if not role:
-        store.audit("login_failed", "anonymous")
         try:
-            access.auth_failure(request, "login", HTTPException(401, "Invalid credentials"))
+            access.auth_failure(request, "login", HTTPException(401, "Invalid credentials"),
+                                record=lambda: store.audit("login_failed", "anonymous"))
         except HTTPException as error:
             if not form:
                 raise
             # The HTML form gets the sign-in page back with a readable message, not a JSON body.
             reason = "rate" if error.status_code == 429 else "invalid"
             return RedirectResponse(f"/auth/login?token_error={reason}", status_code=303)
-    response = RedirectResponse("/app/", status_code=303)
+    response = RedirectResponse("/app/" + next_route, status_code=303)
     response.set_cookie("ghost_session", access.session(role), httponly=True,
                         secure=settings.ghost_cookie_secure, samesite="lax",
                         max_age=settings.ghost_session_seconds, path="/")
@@ -774,7 +785,10 @@ async def get_hunt(hunt_id: str, request: Request):
 
 
 def resume_target_unchanged(hunt) -> bool:
-    """The controller or agent a Hunt started with must be exactly what would execute now."""
+    """The controller or agent a Hunt started with must be exactly what would execute now.
+
+    Deliberately strict: after a deploy that changes the agent harness or a controller, interrupted Hunts
+    are not resumed (their results would mix two versions); start a new Hunt or replay a Ghost Case."""
     if isinstance(hunt, AgentHunt):
         return (TARGETS.get(hunt.target.target_id) == hunt.target.version
                 and hunt.target.source_digest in {None, reference_source_digest()})
