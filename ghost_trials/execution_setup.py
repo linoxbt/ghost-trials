@@ -79,6 +79,24 @@ def prepare(root: Path, output: Path) -> dict:
     }
 
 
+def directory_digest(root: Path) -> str:
+    """Content digest of a checkpoint directory; identical to scripts/checkpoint_digest.sh.
+
+    Hashes relative paths and file contents, never directory location. Paths are ordered by their
+    UTF-8 bytes, which is what `LC_ALL=C sort -z` does in the shell version.
+    """
+    manifest = []
+    for path in sorted((p for p in root.rglob("*") if p.is_file()), key=lambda p: p.relative_to(root).as_posix().encode()):
+        if path.is_symlink():
+            raise ValueError("Materialize checkpoint symlinks before calculating its deployment digest")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        manifest.append(f"{digest.hexdigest()}  ./{path.relative_to(root).as_posix()}\n")
+    return "sha256:" + hashlib.sha256("".join(manifest).encode()).hexdigest()
+
+
 def inspect_checkpoint(root: Path, tag: str = "unitree_g1_sonic", expected_digest: str | None = None) -> dict:
     root = root.resolve(strict=True)
     if not root.is_dir():
@@ -127,17 +145,7 @@ def inspect_checkpoint(root: Path, tag: str = "unitree_g1_sonic", expected_diges
                 offsets=tensor["data_offsets"]
                 if not isinstance(offsets, list) or len(offsets)!=2 or any(type(v) is not int for v in offsets) or not 0 <= offsets[0] <= offsets[1] <= data_size:
                     raise ValueError(f"Out-of-range tensor data in shard: {name}")
-    # Hash relative paths and file contents, never directory location.
-    manifest=[]
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        if path.is_symlink():
-            raise ValueError("Materialize checkpoint symlinks before calculating its deployment digest")
-        digest=hashlib.sha256()
-        with path.open("rb") as stream:
-            for block in iter(lambda:stream.read(1024*1024),b""):
-                digest.update(block)
-        manifest.append(f"{digest.hexdigest()}  ./{path.relative_to(root).as_posix()}\n")
-    digest="sha256:"+hashlib.sha256("".join(manifest).encode()).hexdigest()
+    digest = directory_digest(root)
     if expected_digest is not None and digest != expected_digest:
         raise ValueError("Checkpoint content does not match GR00T_CHECKPOINT_DIGEST")
     return {"checkpoint":str(root), "embodiment":tag, "checkpoint_digest":digest,

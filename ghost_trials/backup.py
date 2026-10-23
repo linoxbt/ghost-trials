@@ -65,9 +65,13 @@ def restore_backup(backup, destination, expected_digest, max_bytes=10_000_000_00
                 for chunk in iter(lambda: source.read(1024 * 1024), b""):
                     output.write(chunk)
             os.chmod(path, 0o600)
-    with sqlite3.connect(f"file:{destination / 'state.sqlite3'}?mode=ro", uri=True) as db:
+    # sqlite3's context manager only commits; close explicitly so the restored file is released.
+    db = sqlite3.connect(f"file:{destination / 'state.sqlite3'}?mode=ro", uri=True)
+    try:
         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Restored database integrity check failed")
+    finally:
+        db.close()
     return {"status": "restore_verified", "files": len(members), "destination": str(destination)}
 
 

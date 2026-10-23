@@ -2,7 +2,13 @@
     email {$ACME_EMAIL}
 }
 {$GHOST_DOMAIN} {
-    request_body {
+    # Physical recordings upload in 256 KiB chunks; the API enforces its own exact per-route limits.
+    @physicalUpload path /physical/sessions/*/artifacts/*
+    request_body @physicalUpload {
+        max_size 320KB
+    }
+    @otherRequests not path /physical/sessions/*/artifacts/*
+    request_body @otherRequests {
         max_size 16KB
     }
     header {

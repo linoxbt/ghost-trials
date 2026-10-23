@@ -363,7 +363,9 @@ class DurableStore(TrialStore):
             pending = db.execute("SELECT COUNT(*) FROM jobs WHERE state IN ('queued','running')").fetchone()[0]
             today = db.execute("SELECT COUNT(*) FROM jobs WHERE submitted>=?", (int(time.time() // 86400) * 86400,)).fetchone()[0]
             states = dict(db.execute("SELECT state,COUNT(*) FROM jobs GROUP BY state").fetchall())
-        return {"pending": pending, "submitted_today": today, "states": states}
+            recent_errors = db.execute("SELECT COUNT(*) FROM jobs WHERE state='error' AND finished>=?",
+                                       (time.time() - 3600,)).fetchone()[0]
+        return {"pending": pending, "submitted_today": today, "states": states, "errors_last_hour": recent_errors}
 
     def revoke_session(self, jti, expires):
         with self.connect() as db:

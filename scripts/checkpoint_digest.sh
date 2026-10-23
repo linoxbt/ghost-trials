@@ -9,7 +9,7 @@ fi
 
 cd "$CHECKPOINT"
 find . -type f -print0 \
-  | sort -z \
-  | xargs -0 sha256sum \
+  | LC_ALL=C sort -z \
+  | LC_ALL=C xargs -0 sha256sum \
   | sha256sum \
   | awk '{print "sha256:" $1}'

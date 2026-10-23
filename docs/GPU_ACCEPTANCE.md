@@ -34,7 +34,7 @@ After reviewing the reported size, opt in to weights download into a **new** dir
 
 ## Deploy and accept one trial
 
-Follow [production deployment](PRODUCTION.md) and [execution handoff](EXECUTION_HANDOFF.md). Keep worker GPU/policy checks enabled. Configure `ISAAC_JOB_ENDPOINT`, `ISAAC_JOB_TOKEN`, `GR00T_CHECKPOINT`, `GR00T_CHECKPOINT_DIGEST` and `GHOST_EXECUTION_BACKEND=gear_sonic_sim` in a private operator environment. Use a TLS endpoint or a localhost SSH tunnel; do not send bearer credentials over public HTTP. The worker's public artifact URL must use the same origin as `ISAAC_JOB_ENDPOINT`.
+Follow [production deployment](PRODUCTION.md) and [execution handoff](EXECUTION_HANDOFF.md). Keep worker GPU/policy checks enabled. With policy checks on, the worker hashes the `GR00T_CHECKPOINT` directory itself (cached until a file changes) and refuses jobs unless it equals `GR00T_CHECKPOINT_DIGEST`, so the checkpoint must be mounted readable in the worker container; jobs must also name the same policy host and port the worker probes. Configure `ISAAC_JOB_ENDPOINT`, `ISAAC_JOB_TOKEN`, `GR00T_CHECKPOINT`, `GR00T_CHECKPOINT_DIGEST` and `GHOST_EXECUTION_BACKEND=gear_sonic_sim` in a private operator environment. Use a TLS endpoint or a localhost SSH tunnel; do not send bearer credentials over public HTTP. The worker's public artifact URL must use the same origin as `ISAAC_JOB_ENDPOINT`.
 
 ```bash
 # Read-only preflight; never creates a GPU job.
@@ -64,4 +64,4 @@ Reviewers must also play the video, compare timestamps and observed behavior, as
 
 ## Keep the public preview safe
 
-Leave `GHOST_JUDGE_PROVIDER=local`, `GHOST_SCENARIO_PROVIDER=local`, and `GHOST_SIMULATOR_PROVIDER=local` on the public development preview. Perform paid acceptance privately. Do not expose public generation endpoints using live credentials until execution authorization, rate limits and spending controls are in place.
+Keep the public deployment on the free CPU providers (`GHOST_MODE=cpu`, with `cpu`/`mujoco_cpu`/`cpu` providers) or the synthetic `local` providers; never point it at the paid GPU providers. Perform paid acceptance privately. Do not expose public generation endpoints using live credentials until execution authorization, rate limits and spending controls are in place.

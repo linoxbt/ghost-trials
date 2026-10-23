@@ -88,7 +88,10 @@ class Accounts:
                 async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
                     response = await client.get(f"https://auth.privy.io/api/v1/apps/{app_id}/jwks.json")
                     response.raise_for_status()
-                    self.jwks = response.json()["keys"]
+                    keys = response.json()["keys"]
+                    if not isinstance(keys, list) or len(keys) > 20:
+                        raise ValueError("Unexpected Privy JWKS shape")
+                    self.jwks = keys
                     self.jwks_until = time.time() + 300
                     self.jwks_fetched_at = time.time()
             for key in self.jwks or []:

@@ -34,8 +34,8 @@ organization-scoped workspaces; organization admins never gain platform-operator
 access. See [AUTHENTICATION.md](AUTHENTICATION.md) for setup and membership rules.
 Replace a compromised token in the private file and restart the API and monitor;
 existing cookies tied to that token become invalid. Changing the admin token
-invalidates every signed legacy session. Legacy token logout removes the browser
-cookie, not a stolen copy. Individual provider sessions are persisted as hashes and
+invalidates every signed legacy session. Legacy token logout revokes that
+signed session server-side, so a stolen copy of the cookie stops working too. Individual provider sessions are persisted as hashes and
 revoked server-side on logout/member removal. Use short session lifetimes.
 
 ## 2. Configure a permanent deployment

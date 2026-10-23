@@ -5,6 +5,7 @@ import sys
 
 import httpx
 
+from .adapters import ExecutionBlocked
 from .config import get_settings
 from .production import CosmosVideoClient, ProductionConfigurationError, _auth_headers
 
@@ -17,10 +18,17 @@ async def main_async() -> int:
     print(f"  execution backend: {settings.ghost_execution_backend}")
     try:
         cosmos = CosmosVideoClient(settings)
-        ready = await cosmos.ready()
-        print(f"  Cosmos: {'ready' if ready else 'unreachable'}")
-        if not ready:
-            failures.append("Cosmos readiness check failed")
+        if settings.cosmos_api_style == "nvidia_catalog":
+            # The hosted catalog has no readiness endpoint; the client already required a key. Access
+            # is proven only by the first generation, so report it rather than fail permanently.
+            print("  Cosmos: hosted catalog key configured (no readiness endpoint; access unverified)")
+        else:
+            ready = await cosmos.ready()
+            print(f"  Cosmos: {'ready' if ready else 'unreachable'}")
+            if not ready:
+                failures.append("Cosmos readiness check failed")
+    except ExecutionBlocked as exc:
+        failures.append(f"Cosmos is missing: {', '.join(exc.missing)}")
     except ProductionConfigurationError as exc:
         failures.append(str(exc))
     reasoner_key = settings.scenario_reasoner_api_key or settings.nebius_api_key

@@ -6,6 +6,10 @@
 
 Ghost Trials helps a robotics evaluation engineer inspect policy failures in simulation. It is not a certification authority. Generated Cosmos footage illustrates a scenario; simulator measurements describe the executed physical trial. Do not imply that pixels are converted into exact simulator state or prove physical correctness.
 
+## Current category ceiling on the GPU path
+
+Both bundled GPU runners (SONIC MuJoCo and Isaac Arena) label their reaction and clearance measurements as proxies in `metric_basis`. The guardrail turns any proxy-based finding into `insufficient_evidence`, so today a GPU trial can only end `failed` (a recorded fall or collision) or `insufficient_evidence`. Physical recordings always end `insufficient_evidence`. This is deliberate: proxy measurements do not support a pass claim. The Nemotron judge's interpretation is still retained for review, but it cannot raise the category until a runner records non-proxy measurements.
+
 ## Workspace
 
 - `/app/#/compare`: pick baseline and candidate records, inspect compatibility warnings and metric deltas, link playback positions, export the comparison. Viewing this page never launches compute.

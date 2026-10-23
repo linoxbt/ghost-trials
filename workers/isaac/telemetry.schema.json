@@ -1,18 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Ghost Trials simulator telemetry sample",
+  "description": "Documentation of workers/isaac/trial_runner.py TelemetrySample, which is the enforced contract; tests keep the two in sync.",
   "type": "object",
   "required": ["timestamp_ms", "hazard_active", "clearance_m", "collision", "fall", "policy_reacted"],
   "properties": {
     "timestamp_ms": {"type": "number", "minimum": 0},
     "hazard_active": {"type": "boolean"},
+    "policy_reacted": {"type": "boolean"},
     "clearance_m": {"type": ["number", "null"], "minimum": 0},
     "collision": {"type": "boolean"},
     "fall": {"type": "boolean"},
-    "policy_reacted": {"type": "boolean"},
     "intervention": {"type": "boolean", "default": false},
-    "task_completed": {"type": "boolean"},
-    "simulator_version": {"type": "string"}
+    "task_completed": {"type": "boolean", "default": false},
+    "simulator_version": {"type": ["string", "null"]},
+    "metric_basis": {"type": ["string", "null"]},
+    "contact_slip_speed_m_s": {"type": ["number", "null"], "minimum": 0},
+    "effective_friction": {"type": ["number", "null"], "minimum": 0, "maximum": 2},
+    "ground_contact_count": {"type": "integer", "minimum": 0, "default": 0}
   },
   "additionalProperties": true
 }

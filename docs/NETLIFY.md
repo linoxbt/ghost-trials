@@ -18,6 +18,7 @@ resources listed in [GPU acceptance](GPU_ACCEPTANCE.md).
 ## Private API deployment
 
 See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for permanent HTTPS hosting
-and authenticated access. The Netlify builder now proxies `/account`, `/organizations`, `/organizations/*`, `/auth/*`, `/ops/*` and
+and authenticated access. The Netlify builder now proxies `/account`, `/organizations`, `/organizations/*`, `/auth/*` and
 `/ready` in addition to the trial/evidence routes. A temporary tunnel is not a
 production backend, and this configuration does not resolve a Netlify usage limit.
+Operator routes (`/ops/*`) are deliberately not proxied; call them on the backend origin.

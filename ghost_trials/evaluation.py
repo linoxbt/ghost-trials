@@ -181,7 +181,9 @@ def guard_judgment(trial: Trial, scenario: Scenario, result: JudgeResult) -> Jud
         if report["missing_evidence"] or evidence_class(trial) != "artifact_validated_simulation":
             return result.model_copy(update={"score_category": ScoreCategory.INSUFFICIENT,
                                               "confidence": 0.0, "reasoning_trace": "CPU execution evidence is incomplete; no task verdict."})
-        expected = ScoreCategory.AVOIDED if m.task_completed else ScoreCategory.FAILED
+        # A recorded collision fails the trial even when the block lands in band, matching the Hunt's
+        # observed_outcome; otherwise one trial could score AVOIDED and also create a Ghost Case.
+        expected = ScoreCategory.AVOIDED if m.task_completed and not m.fall_or_collision else ScoreCategory.FAILED
         return result.model_copy(update={"score_category": expected})
     reason = None
     category = result.score_category
