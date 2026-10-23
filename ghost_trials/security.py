@@ -139,6 +139,10 @@ class AccessControl:
                     connection.state.resolved_role = current.role if current else None
                 return connection.state.resolved_role
             return principal.role
+        return self.credential_role(connection)
+
+    def credential_role(self, connection):
+        """Role from the presented credentials, ignoring any principal cached on the connection."""
         if not self.enabled:
             return "admin"  # Public synthetic development mode only.
         header = connection.headers.get("authorization", "")
@@ -146,11 +150,12 @@ class AccessControl:
             return self.token_role(header[7:])
         return self.cookie_role(connection.cookies.get("ghost_session", ""))
 
-    def principal(self, connection):
+    def principal(self, connection, *, fresh=False):
+        """fresh=True re-checks role-token credentials (expiry, revocation, rotation) for long-lived sockets."""
         raw = connection.cookies.get("ghost_session", "")
         if raw.startswith("usr_"):
             return self.accounts.resolve(raw)
-        role = self.role(connection)
+        role = self.credential_role(connection) if fresh else self.role(connection)
         if role:
             return Principal("role:" + role if self.enabled else "demo", "legacy", role,
                              "role_token" if self.enabled else "demo")
@@ -224,7 +229,7 @@ class AccessControl:
 
     async def middleware(self, request, call_next):
         path = request.url.path
-        public = path in {"/", "/docs", "/docs/", "/docs/agent", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite", "/csp-report"} or path.startswith("/assets/") or path.startswith("/app")
+        public = path in {"/", "/docs", "/docs/", "/docs/agent", "/health", "/auth/login", "/auth/session", "/auth/config", "/auth/privy/session", "/auth/dynamic/session", "/auth/invite", "/csp-report"} or path.startswith("/assets/") or path == "/app" or path.startswith("/app/")
         request.state.principal = self.principal(request)
         if self.enabled and not public:
             role = self.role(request)
@@ -235,6 +240,11 @@ class AccessControl:
                     return self.secured(JSONResponse({"detail": "Read-only role"}, 403), path, public)
                 if not request.headers.get("authorization", "").startswith("Bearer ") and not self.origin_allowed(request):
                     return self.secured(JSONResponse({"detail": "Untrusted request origin"}, 403), path, public)
+        elif (not self.enabled and request.method not in {"GET", "HEAD", "OPTIONS"}
+              and request.headers.get("origin") and not self.origin_allowed(request)):
+            # Unauthenticated development grants everyone admin; still refuse cross-site browser writes
+            # (a page on another origin must not drive the local API). Non-browser clients send no Origin.
+            return self.secured(JSONResponse({"detail": "Untrusted request origin"}, 403), path, public)
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             principal = request.state.principal
             physical_chunk = bool(request.method == "PUT" and self.enabled and principal and re.fullmatch(

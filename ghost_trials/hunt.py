@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
-from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, compare_trials, evidence_class, evidence_report, expected_rubric
+from .evaluation import RUBRIC_VERSION, CPU_RUBRIC_VERSION, compare_trials, evidence_class, evidence_report, expected_rubric, thresholds
 from .models import ModelReview, Trial, TrialStatus, utc_now
 from workers.isaac.hazards import supported_controls as isaac_supported_controls
 
@@ -187,6 +187,7 @@ class RegressionResult(BaseModel):
     candidate_trial_id: str
     comparison: dict
     outcome: Literal["fixed_on_case", "still_failing", "incompatible_or_unverified"]
+    baseline_reproduction: str | None = None
 
 
 class Hunt(BaseModel):
@@ -242,9 +243,16 @@ def observed_outcome(trial: Trial, scenario=None, *, allow_synthetic_fixture: bo
         return "failure", "Recorded fall or collision"
     if not m.task_completed:
         return "failure", "Recorded task noncompletion"
-    if (m.min_clearance_m is not None and m.min_clearance_m < .25 or
-            m.max_contact_slip_speed_m_s is not None and m.max_contact_slip_speed_m_s > .2):
+    # Use the scenario's versioned rubric thresholds when available, so a Hunt "pass" never hides a
+    # trial the rubric would fail on clearance, reaction time or slip.
+    limits = thresholds(scenario) if scenario is not None and scenario.structured_description.hazard_type != "object_positioning" else {}
+    clearance_limit = limits.get("clearance_m", .25) if limits else .25
+    slip_limit = limits.get("max_contact_slip_speed_m_s") or .2
+    if (clearance_limit is not None and m.min_clearance_m is not None and m.min_clearance_m < clearance_limit or
+            m.max_contact_slip_speed_m_s is not None and m.max_contact_slip_speed_m_s > slip_limit):
         return "near_failure", "Observed low clearance or high contact slip"
+    if limits and m.time_to_react_ms is not None and m.time_to_react_ms > limits["reaction_ms"]:
+        return "near_failure", "Observed slow reaction relative to the rubric threshold"
     final_x = (m.robot_metrics or {}).get("object_final_x_m")
     if isinstance(final_x, (int, float)) and min(final_x - CPU_TARGET_BAND[0], CPU_TARGET_BAND[1] - final_x) < CPU_NEAR_MISS_M:
         return "near_failure", f"Reached the target band within {CPU_NEAR_MISS_M} m of its edge"
@@ -296,24 +304,48 @@ class HuntPlanner:
                 if probe:
                     return probe
             phase = "mutate" if failures else "exploit"
-            controls = anchor.controls.copy()
             candidate_seed = anchor.seed
-            dimension = self.space.dimensions[(sequence - 1) % len(self.space.dimensions)]
-            width = (dimension.maximum - dimension.minimum) * (.12 if failures else .25)
-            direction = -1 if sequence % 2 else 1
-            controls[dimension.name] = round(min(dimension.maximum, max(dimension.minimum,
-                                                  controls[dimension.name] + direction * width)), 5)
-        for dimension in self.space.dimensions:
-            if dimension.value_type == "discrete":
-                controls[dimension.name] = min(dimension.allowed_values,
-                                               key=lambda v: abs(v - controls[dimension.name]))
+            controls = self.untried_neighbor(anchor, sequence, .12 if failures else .25)
+            if controls is None:
+                # Every nearby step was already executed: explore instead of re-running a recipe,
+                # which would spend budget and save a duplicate Ghost Case.
+                controls = {d.name: round(rng.uniform(d.minimum, d.maximum), 5) for d in self.space.dimensions}
+                phase, candidate_seed = "explore", rng.randrange(2_147_483_647)
+        controls = self.snap(controls)
         self.space.validate_controls(controls)
         return TrialCandidate(sequence=sequence, phase=phase, controls=controls,
                               seed=candidate_seed)
 
+    def snap(self, controls: dict[str, float]) -> dict[str, float]:
+        """Move discrete dimensions to their nearest allowed value."""
+        controls = controls.copy()
+        for dimension in self.space.dimensions:
+            if dimension.value_type == "discrete":
+                controls[dimension.name] = min(dimension.allowed_values,
+                                               key=lambda v: abs(v - controls[dimension.name]))
+        return controls
+
+    def untried_neighbor(self, anchor: TrialCandidate, sequence: int, fraction: float) -> dict[str, float] | None:
+        """Step one dimension away from the anchor, preferring the historical order, skipping executed recipes."""
+        tried = {(tuple(sorted(c.controls.items())), c.seed) for c in self.hunt.candidates if c.phase != "reproduce"}
+        dimensions = self.space.dimensions
+        first_direction = -1 if sequence % 2 else 1
+        for offset in range(2 * len(dimensions)):
+            dimension = dimensions[(sequence - 1 + offset // 2) % len(dimensions)]
+            direction = first_direction if offset % 2 == 0 else -first_direction
+            width = (dimension.maximum - dimension.minimum) * fraction
+            controls = anchor.controls.copy()
+            controls[dimension.name] = round(min(dimension.maximum, max(dimension.minimum,
+                                                  controls[dimension.name] + direction * width)), 5)
+            controls = self.snap(controls)
+            if (tuple(sorted(controls.items())), anchor.seed) not in tried:
+                return controls
+        return None
+
     def grid(self) -> list[dict[str, float]]:
         """Distinct {default, minimum, maximum} combinations, fewest departures from the defaults first."""
-        levels = [list(dict.fromkeys([d.default, d.minimum, d.maximum])) for d in self.space.dimensions]
+        levels = [list(dict.fromkeys(self.snap({d.name: v})[d.name] if d.value_type == "discrete" else v
+                                     for v in (d.default, d.minimum, d.maximum))) for d in self.space.dimensions]
         combos = [dict(zip([d.name for d in self.space.dimensions], values)) for values in itertools.product(*levels)]
         defaults = {d.name: d.default for d in self.space.dimensions}
         return sorted(combos, key=lambda c: sum(c[k] != defaults[k] for k in c))
@@ -444,10 +476,13 @@ def compare_case_regression(case: GhostCase, baseline: Trial, candidate: Trial,
         warnings.append("A distinct, verified candidate checkpoint is required")
     if candidate_scenario.execution_recipe != case.execution_recipe:
         warnings.append("Candidate recipe differs from the saved Ghost Case")
+    if case.reproduction.status in {"flaky", "not_reproduced"}:
+        # A pass against a baseline that does not reliably fail is not evidence of a fix.
+        warnings.append(f"Baseline failure is {case.reproduction.status.replace('_', ' ')}; a passing candidate cannot show a fix")
     comparison["comparable"] = not warnings
     outcome = "incompatible_or_unverified"
     if comparison["comparable"]:
-        observation, _ = observed_outcome(candidate)
+        observation, _ = observed_outcome(candidate, candidate_scenario)
         outcome = "fixed_on_case" if observation in PASSING_OUTCOMES else "still_failing" if observation == "failure" else "incompatible_or_unverified"
     return RegressionResult(case_id=case.case_id, candidate_trial_id=candidate.trial_id,
-                            comparison=comparison, outcome=outcome)
+                            comparison=comparison, outcome=outcome, baseline_reproduction=case.reproduction.status)

@@ -82,12 +82,21 @@ class HuntService:
         for case_id in hunt.case_ids:
             case = self.stored_case(case_id)
             baseline = by_trial.get(case.baseline_trial_id) if isinstance(case, GhostCase) else None
-            if baseline is None or case.boundary is not None:
+            if baseline is None:
                 continue
+            # empirical_boundary returns the narrowest bracket over every trial so far, so a later or
+            # resumed trial can only tighten it; refresh whenever it changes.
             boundary = empirical_boundary(hunt, anchor=baseline)
-            if boundary:
+            if boundary and boundary != case.boundary:
                 case.boundary = boundary
                 self.store.put_domain("ghost_case", case_id, case.model_dump_json())
+
+    def _attach_boundary_quietly(self, hunt: Hunt):
+        """Keep brackets observed before an interruption; a failure here must not mask the stop reason."""
+        try:
+            self.attach_boundary(hunt)
+        except Exception:
+            logging.getLogger(__name__).exception("boundary_attach_failed hunt_id=%s", hunt.hunt_id)
 
     def default_agent_execution_allowed(self, organization_id, subject=None):
         if self.store.job_counts()["submitted_today"] + self.store.agent_reservations_today() >= self.settings.ghost_max_jobs_per_day:
@@ -330,9 +339,18 @@ class HuntService:
                     hunt.status = HuntStatus.BLOCKED
                 elif candidate.outcome == "failure" and candidate.evidence_class == "artifact_validated_simulation":
                     if candidate.phase != "reproduce":
-                        case = case_from_trial(hunt, trial, self.store.scenarios[trial.scenario_id])
-                        self.store.put_domain("ghost_case", case.case_id, case.model_dump_json())
-                        hunt.case_ids.append(case.case_id)
+                        try:
+                            case = case_from_trial(hunt, trial, self.store.scenarios[trial.scenario_id])
+                        except ValueError as exc:
+                            # Never leave a recorded "failure" without its case: a resumed Hunt would
+                            # then try to reproduce a failure that has nowhere to record the result.
+                            candidate.outcome = "insufficient_evidence"
+                            candidate.observation = f"Failure could not be admitted as a Ghost Case: {exc}"
+                            hunt.provider_errors.append(f"{trial.trial_id}: {candidate.observation}")
+                            hunt.status = HuntStatus.BLOCKED
+                        else:
+                            self.store.put_domain("ghost_case", case.case_id, case.model_dump_json())
+                            hunt.case_ids.append(case.case_id)
                     else:
                         self._update_reproduction(hunt, candidate)
                 elif candidate.phase == "reproduce":
@@ -347,8 +365,10 @@ class HuntService:
         except asyncio.CancelledError:
             hunt.status = HuntStatus.INTERRUPTED
             self.save(hunt)
+            self._attach_boundary_quietly(hunt)
             raise
         except Exception as exc:
+            self._attach_boundary_quietly(hunt)
             hunt.status = HuntStatus.BLOCKED
             reason = stop_reason(exc, hunt.hunt_id)
             hunt.provider_errors.append(f"Hunt stopped: {reason}" if reason else
@@ -422,12 +442,17 @@ class HuntService:
     def _with_manual_replays(self, case: GhostCase, rows=None, trial_rows=None) -> GhostCase:
         rows = rows if rows is not None else [json.loads(raw) for raw in self.store.list_domain_for_org("case_replay", case.organization_id)]
         trial_rows = trial_rows if trial_rows is not None else self.store.trials.values()
+        # Regression candidates also replay the baseline (and on GPU share its policy name); they test
+        # another checkpoint and are not reproduction attempts of this failure.
+        regressions = {json.loads(raw).get("trial_id") for raw in
+                       self.store.list_domain_for_org("regression", case.organization_id)}
         ids = list(dict.fromkeys(case.reproduction.attempts +
                                   [row["trial_id"] for row in rows if row.get("case_id") == case.case_id] +
                                   [trial.trial_id for trial in trial_rows
                                    if trial.replay_of == case.baseline_trial_id
                                    and trial.organization_id == case.organization_id
-                                   and trial.policy_name == case.policy.name]))
+                                   and trial.policy_name == case.policy.name
+                                   and trial.trial_id not in regressions]))
         attempts = []
         invalid = False
         from .evaluation import evidence_report
@@ -436,6 +461,8 @@ class HuntService:
             if trial is None or (trial.replay_of != case.baseline_trial_id and trial_id not in case.reproduction.attempts):
                 invalid = True
                 continue
+            if trial.status not in {TrialStatus.DONE, TrialStatus.ERROR, TrialStatus.BLOCKED}:
+                continue  # Still queued or running: neither evidence nor a defect yet.
             scenario = self.store.scenarios.get(trial.scenario_id)
             if (not scenario or scenario.execution_recipe != case.execution_recipe or
                     not trial.metrics or trial.metrics.policy_checkpoint_digest != case.policy.checkpoint_digest or
@@ -519,9 +546,11 @@ class HuntService:
         self.save(hunt)
         deadline = time.monotonic() + hunt.max_wall_seconds
         try:
+            exhausted = False
             while len(hunt.candidates) < hunt.max_trials and time.monotonic() < deadline:
                 candidate = hunt.candidates[-1] if hunt.candidates and hunt.candidates[-1].outcome is None else self._agent_candidate(hunt)
                 if candidate is None:
+                    exhausted = True
                     break
                 if candidate not in hunt.candidates:
                     hunt.candidates.append(candidate)
@@ -575,9 +604,15 @@ class HuntService:
                                               evidence_sha256=trial.evidence_sha256)
                         self.store.put_domain("ghost_case", case.case_id, case.model_dump_json())
                         hunt.case_ids.append(case.case_id)
-                else:
+                elif trial.status == AgentVerdict.VERIFIED_SUCCESS:
                     candidate.outcome = "pass"
                     candidate.observation = "All deterministic assertions passed"
+                else:
+                    # INCONCLUSIVE or UNSUPPORTED must never read as a pass.
+                    candidate.outcome = "insufficient_evidence"
+                    candidate.observation = f"Oracle verdict {trial.status}: no policy outcome"
+                    hunt.provider_errors.append(f"{trial_id}: oracle verdict {trial.status}; no policy verdict")
+                    hunt.status = HuntStatus.BLOCKED
                 if candidate.phase == "reproduce":
                     for case_id in hunt.case_ids:
                         case = self.case(case_id)
@@ -588,7 +623,8 @@ class HuntService:
                 self.save(hunt)
                 if hunt.status == HuntStatus.BLOCKED:
                     return
-            hunt.status = HuntStatus.COMPLETE if time.monotonic() < deadline else HuntStatus.INTERRUPTED
+            finished = exhausted or (len(hunt.candidates) >= hunt.max_trials and hunt.candidates[-1].outcome is not None)
+            hunt.status = HuntStatus.COMPLETE if finished or time.monotonic() < deadline else HuntStatus.INTERRUPTED
             if hunt.status == HuntStatus.INTERRUPTED:
                 hunt.provider_errors.append("Hunt wall-time budget exhausted; no further trials executed")
             self.save(hunt)

@@ -34,14 +34,19 @@ def cached_verification(kind: str, directory: Path, expected: str, verify):
         except (OSError, ValueError, KeyError, TypeError) as exc:
             # Store the type and arguments, not the instance: re-raising one instance keeps growing its
             # traceback and would pin every frame's locals in memory.
-            hit = ("error", (type(exc), exc.args))
+            hit = ("error", (type(exc), exc.args, str(exc)))
         with _lock:
             _cache[key] = hit
             while len(_cache) > _MAX_ENTRIES:
                 _cache.popitem(last=False)
     if hit[0] == "error":
-        kind, args = hit[1]
-        raise kind(*args)
+        kind, args, message = hit[1]
+        try:
+            rebuilt = kind(*args)
+        except TypeError:
+            # Some exceptions (e.g. json.JSONDecodeError) cannot be rebuilt from args alone.
+            rebuilt = ValueError(message) if issubclass(kind, ValueError) else RuntimeError(message)
+        raise rebuilt
     return copy.deepcopy(hit[1])
 
 

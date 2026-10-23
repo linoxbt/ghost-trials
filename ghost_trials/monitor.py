@@ -15,8 +15,12 @@ async def check(client, origin, token):
     faults = []
     if not status["database_ok"] or not status["runner_alive"]:
         faults.append("API database or job runner unhealthy")
-    if status["jobs"]["states"].get("error", 0):
-        faults.append(f"Recorded failed jobs: {status['jobs']['states']['error']}")
+    # The all-time error count never decreases, so alert only on recent failures; one old failure
+    # must not keep the monitor in a permanent alert state.
+    jobs = status["jobs"]
+    recent = jobs["errors_last_hour"] if "errors_last_hour" in jobs else jobs["states"].get("error", 0)
+    if recent:
+        faults.append(f"Failed jobs in the last hour: {recent}")
     return faults
 
 

@@ -26,10 +26,35 @@ def trajectory_svg(rows: list[dict]) -> bytes:
     points = " ".join(f"{xcoord(r['object_position_m'][0])},{ycoord(r['object_position_m'][1])}" for r in rows)
     arm = " ".join(f"{xcoord(r['pusher_position_m'][0])},{ycoord(r['pusher_position_m'][1])}" for r in rows)
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 250" role="img" aria-label="State-derived MuJoCo trajectory; not camera footage">'
-            '<rect width="700" height="250" fill="#151b25"/><rect x="470" y="95" width="150" height="50" fill="#3c7159" opacity=".5"/>'
+            '<rect width="700" height="250" fill="#151b25"/><rect x="470" y="90" width="150" height="60" fill="#3c7159" opacity=".5"/>'
             f'<polyline points="{points}" fill="none" stroke="#ff8054" stroke-width="4"/>'
             f'<polyline points="{arm}" fill="none" stroke="#77c9ff" stroke-width="2"/>'
             '<text x="25" y="225" fill="white" font-size="13">Orange: block center · blue: gantry pusher · MuJoCo state trajectory</text></svg>').encode()
+
+
+def _check_summary_against_rows(summary: dict, rows: list[dict], config: dict):
+    """Cross-check summary metrics with the sampled trace.
+
+    Peaks are computed over every physics step and rows sample every fifth step, so a sampled value may
+    not exceed its summary peak; counts that come from the samples themselves must match exactly.
+    """
+    if summary["object_initial_x_m"] != config["object_position_x_m"]:
+        raise ValueError("CPU initial position differs from recipe")
+    for field, key in (("max_contact_force_n", "contact_force_n"), ("max_block_tilt_deg", "block_tilt_deg"),
+                       ("max_joint_tracking_error_m", "controller_tracking_error_m")):
+        if max(float(row[key]) for row in rows) > summary[field] + 1e-6:
+            raise ValueError(f"CPU {field} is lower than a sampled value")
+    if summary["pusher_object_contact_count"] != sum(bool(row["pusher_block_contact"]) for row in rows):
+        raise ValueError("CPU contact count differs from telemetry")
+    for field in ("pusher_table_collision_count", "joint_limit_violation_count"):
+        if type(summary[field]) is not int or summary[field] < 0:
+            raise ValueError(f"Invalid CPU metric {field}")
+    if sum(bool(row["joint_limit_violation"]) for row in rows) > summary["joint_limit_violation_count"]:
+        raise ValueError("CPU joint-limit count is lower than the sampled violations")
+    first_sampled = next((row["timestamp_ms"] / 1000 for row in rows if row["pusher_block_contact"]), None)
+    first = summary["controller_first_contact_s"]
+    if first_sampled is not None and (first is None or first > first_sampled + 1e-6):
+        raise ValueError("CPU first-contact time is later than the sampled contact")
 
 
 def verify_cpu_bundle(root: Path, expected_digest: str) -> dict:
@@ -82,6 +107,7 @@ def verify_cpu_bundle(root: Path, expected_digest: str) -> dict:
         value = summary[field]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
             raise ValueError(f"Invalid CPU metric {field}")
+    _check_summary_against_rows(summary, rows, config)
     return {"status": "cpu_trace_metrics_verified", "verified_artifacts": len(manifest),
             "samples": len(rows), "checkpoint_digest": expected_digest,
             "task_completed_recomputed": recomputed, "video_decoded": False,

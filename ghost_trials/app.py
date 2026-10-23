@@ -79,9 +79,10 @@ async def publish(event) -> None:
     async def deliver(socket) -> bool:
         """Send one event; True when the socket should be dropped."""
         try:
-            principal = access.principal(socket)
+            principal = access.principal(socket, fresh=True)
             initial = getattr(socket.state, "principal", None)
-            if not principal or not initial or principal.organization_id != initial.organization_id:
+            if (not principal or not initial or principal.organization_id != initial.organization_id
+                    or principal.role != initial.role):
                 await socket.close(code=1008)
                 return True
             trial = store.trials.get(event.trial_id)
@@ -979,7 +980,8 @@ class RegressionCreate(BaseModel):
     target_id: str | None = None
 
 
-@app.post("/ghost-cases/{case_id}/regressions", status_code=200)
+@app.post("/ghost-cases/{case_id}/regressions", status_code=200,
+          responses={202: {"description": "Physical-AI regression queued; poll the regression result"}})
 async def run_case_regression(case_id: str, request: Request, body: RegressionCreate | None = None):
     access.require(request, ("admin", "operator"))
     case = await owned_case(request, case_id)

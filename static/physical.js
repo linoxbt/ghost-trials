@@ -45,11 +45,11 @@ async function mountPhysical(){
     };
     // A real button opens the hidden picker, so selecting files works from the keyboard too.
     const fileInput=card.querySelector('[data-files]'),pick=card.querySelector('[data-pick-files]');if(fileInput){fileInput.onchange=()=>upload(s,card,fileInput.files);pick.onclick=()=>fileInput.click();}
-    const remove=card.querySelector('[data-delete]');if(remove)remove.onclick=async()=>{if(!confirm('Delete this recording\'s files to free storage? The flight record stays, but its video and telemetry are gone.'))return;remove.disabled=true;try{await json(`/physical/sessions/${s.session_id}`,{method:'DELETE'});await reload();}catch(e){notify(e.message);remove.disabled=false;}};
-    const cancel=card.querySelector('[data-cancel]');if(cancel)cancel.onclick=async()=>{if(!confirm('Cancel this recording session? Its uploaded files are deleted.'))return;try{await json(`/physical/sessions/${s.session_id}/cancel`,{method:'POST'});await reload();}catch(e){notify(e.message);}};
+    const remove=card.querySelector('[data-delete]');if(remove)remove.onclick=async()=>{if(!confirm('Delete this recording\'s files to free storage? The flight record stays, but its video and telemetry are gone.'))return;remove.disabled=true;try{await json(`/physical/sessions/${encodeURIComponent(s.session_id)}`,{method:'DELETE'});await reload();}catch(e){notify(e.message);remove.disabled=false;}};
+    const cancel=card.querySelector('[data-cancel]');if(cancel)cancel.onclick=async()=>{if(!confirm('Cancel this recording session? Its uploaded files are deleted.'))return;try{await json(`/physical/sessions/${encodeURIComponent(s.session_id)}/cancel`,{method:'POST'});await reload();}catch(e){notify(e.message);}};
     const judge=card.querySelector('[data-judge]');if(judge)judge.onclick=async()=>{
      if(!confirm('Request real Nemotron inference on this uploaded recording? Token Factory charges may apply. Hardware provenance remains unverified.'))return;
-     judge.disabled=true;try{const result=await json(`/physical/sessions/${s.session_id}/judge`,{method:'POST'});location.hash=`#/trials/${result.trial_id}`;}catch(e){notify(e.message);judge.disabled=false;}
+     judge.disabled=true;try{const result=await json(`/physical/sessions/${encodeURIComponent(s.session_id)}/judge`,{method:'POST'});location.hash=`#/trials/${encodeURIComponent(result.trial_id)}`;}catch(e){notify(e.message);judge.disabled=false;}
     };
    }
   }catch(e){if(root.isConnected)root.textContent=e.message;}
@@ -62,10 +62,10 @@ async function mountPhysical(){
    const limits=await json('/physical/capabilities');if([...files].reduce((a,f)=>a+f.size,0)>limits.maximum_bundle_bytes)throw new Error('Recording exceeds the allowed bundle size.');
    const manifest={};status.textContent='Calculating recording checksums…';
    for(const f of files)manifest[f.name]={bytes:f.size,sha256:await sha256File(f)};
-   const current=await json(`/physical/sessions/${session.session_id}/manifest`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(manifest)});
+   const current=await json(`/physical/sessions/${encodeURIComponent(session.session_id)}/manifest`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(manifest)});
    for(const file of files){let start=current.uploads[file.name]?.received_bytes||0;
     while(start<file.size){const end=Math.min(start+262144,file.size);status.textContent=`Uploading ${file.name} · ${Math.round(start/file.size*100)}%`;
-     const url=`/physical/sessions/${session.session_id}/artifacts/${file.name}`;
+     const url=`/physical/sessions/${encodeURIComponent(session.session_id)}/artifacts/${encodeURIComponent(file.name)}`;
      const options={method:'PUT',headers:{'Content-Type':'application/octet-stream','Content-Range':`bytes ${start}-${end-1}/${file.size}`},body:file.slice(start,end)};
      let result;
      for(let attempt=0;attempt<4;attempt++){
@@ -79,13 +79,13 @@ async function mountPhysical(){
     }
    }
    status.textContent='Decoding video and independently checking telemetry…';
-   try{await json(`/physical/sessions/${session.session_id}/validate`,{method:'POST'});}
+   try{await json(`/physical/sessions/${encodeURIComponent(session.session_id)}/validate`,{method:'POST'});}
    catch(e){
     // The hosted proxy can time out while decoding continues on the backend; wait for the stored result.
     if(e.status&&![502,503,504].includes(e.status))throw e;
     status.textContent='Validation is still running on the server; checking its result…';
     let validated=false;
-    for(let i=0;i<40&&!validated;i++){await new Promise(done=>setTimeout(done,3000));const current=await json(`/physical/sessions/${session.session_id}`).catch(()=>null);validated=current?.status==='validated';}
+    for(let i=0;i<40&&!validated;i++){await new Promise(done=>setTimeout(done,3000));const current=await json(`/physical/sessions/${encodeURIComponent(session.session_id)}`).catch(()=>null);validated=current?.status==='validated';}
     if(!validated)throw new Error('Validation did not finish. Check the recording and select Validate again.');
    }
    notify('Recording validated. No paid judge was called.');await refresh(true);if(root.isConnected)await reload();

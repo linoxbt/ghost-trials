@@ -60,7 +60,7 @@ async def test_publish_tolerates_subscriber_changes_mid_broadcast(monkeypatch):
 
     class Socket:
         def __init__(self, join=None):
-            self.state = SimpleNamespace(principal=SimpleNamespace(organization_id="org_a"))
+            self.state = SimpleNamespace(principal=SimpleNamespace(organization_id="org_a", role="admin"))
             self.join, self.sent = join, 0
 
         async def send_json(self, payload):
@@ -71,7 +71,7 @@ async def test_publish_tolerates_subscriber_changes_mid_broadcast(monkeypatch):
     late = Socket()
     first = Socket(join=late)
     monkeypatch.setattr(app_module, "subscribers", {first})
-    monkeypatch.setattr(app_module.access, "principal", lambda socket: socket.state.principal)
+    monkeypatch.setattr(app_module.access, "principal", lambda socket, **_: socket.state.principal)
     trial = SimpleNamespace(organization_id="org_a")
     monkeypatch.setattr(app_module.store, "trials", {"trl_live": trial})
     await app_module.publish(LiveEvent(trial_id="trl_live", status=TrialStatus.DONE, message="done"))
@@ -86,7 +86,7 @@ async def test_a_stuck_socket_cannot_stall_the_broadcast(monkeypatch):
 
     class Socket:
         def __init__(self, delay):
-            self.state = SimpleNamespace(principal=SimpleNamespace(organization_id="org_a"))
+            self.state = SimpleNamespace(principal=SimpleNamespace(organization_id="org_a", role="admin"))
             self.delay, self.sent = delay, 0
 
         async def send_json(self, payload):
@@ -95,7 +95,7 @@ async def test_a_stuck_socket_cannot_stall_the_broadcast(monkeypatch):
 
     sockets = [Socket(60) for _ in range(5)] + [Socket(0)]
     monkeypatch.setattr(app_module, "subscribers", set(sockets))
-    monkeypatch.setattr(app_module.access, "principal", lambda socket: socket.state.principal)
+    monkeypatch.setattr(app_module.access, "principal", lambda socket, **_: socket.state.principal)
     monkeypatch.setattr(app_module.store, "trials", {"trl_live": SimpleNamespace(organization_id="org_a")})
     started = _time.monotonic()
     await app_module.publish(LiveEvent(trial_id="trl_live", status=TrialStatus.DONE, message="done"))

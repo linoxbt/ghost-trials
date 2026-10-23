@@ -39,6 +39,29 @@ class IsaacJobRequest(BaseModel):
     policy: PolicySpec
 
 
+_checkpoint_digests: dict = {}
+
+
+async def measured_checkpoint_digest(checkpoint: str) -> str | None:
+    """Hash the served checkpoint's bytes, reusing the result while no file's size or mtime changes."""
+    root = Path(checkpoint)
+    if not root.is_dir():
+        return None
+    def compute():
+        files = sorted((str(p.relative_to(root)), p.stat().st_size, p.stat().st_mtime_ns)
+                       for p in root.rglob("*") if p.is_file())
+        key = (str(root.resolve()), tuple(files))
+        if key not in _checkpoint_digests:
+            from ghost_trials.execution_setup import directory_digest
+            _checkpoint_digests.clear()
+            _checkpoint_digests[key] = directory_digest(root)
+        return _checkpoint_digests[key]
+    try:
+        return await asyncio.to_thread(compute)
+    except (OSError, ValueError):
+        return None
+
+
 class WorkerSettings:
     token = os.getenv("ISAAC_WORKER_TOKEN")
     output_root = Path(os.getenv("ISAAC_WORKER_OUTPUT_ROOT", "artifacts/worker"))
@@ -187,6 +210,12 @@ async def ready(authorization: str | None = Header(default=None)):
     if settings.require_policy:
         if not settings.checkpoint or not settings.checkpoint_digest:
             failures.append("GR00T_CHECKPOINT and GR00T_CHECKPOINT_DIGEST must identify the served policy")
+        else:
+            measured = await measured_checkpoint_digest(settings.checkpoint)
+            if measured is None:
+                failures.append("GR00T_CHECKPOINT must be a checkpoint directory readable by the worker")
+            elif measured != settings.checkpoint_digest:
+                failures.append("Checkpoint content on disk does not match GR00T_CHECKPOINT_DIGEST")
         try:
             _, writer = await asyncio.wait_for(asyncio.open_connection(settings.policy_host, settings.policy_port), 2)
             writer.close()
@@ -236,6 +265,9 @@ async def submit(
     await ready(authorization)
     if settings.require_policy and (request.policy.checkpoint != settings.checkpoint or request.policy.checkpoint_digest != settings.checkpoint_digest):
         raise HTTPException(422, "Requested policy does not match the worker's served checkpoint")
+    if settings.require_policy and (request.policy.host != settings.policy_host or request.policy.port != settings.policy_port):
+        # Readiness probed this worker's policy server; the runner must connect to that same server.
+        raise HTTPException(422, "Requested policy server differs from the worker's probed policy server")
     job_id = f"isaac_{uuid.uuid4().hex[:12]}"
     jobs[job_id] = {"job_id": job_id, "status": "queued", "error": None, "result": None}
     save_job(job_id)
