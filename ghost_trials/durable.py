@@ -5,6 +5,7 @@ pipeline adapters and cache are process-local. Scale-out requires a new worker
 and database architecture, not simply extra Uvicorn workers.
 """
 import json
+import re
 import logging
 import sqlite3
 import time
@@ -81,8 +82,18 @@ class DurableStore(TrialStore):
                 # Ordered, append-only schema changes tracked with PRAGMA user_version.
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
                 for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
-                    connection.executescript(script)
-                    connection.execute(f"PRAGMA user_version={number}")
+                    # Each migration and its version bump commit together, so a crash can never leave a
+                    # half-applied migration that fails (e.g. "duplicate column") on every later start.
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        for statement in (part.strip() for part in script.split(";")):
+                            if statement:
+                                connection.execute(statement)
+                        connection.execute(f"PRAGMA user_version={number}")
+                        connection.commit()
+                    except BaseException:
+                        connection.rollback()
+                        raise
                 self._schema_path = self.database_path
         try:
             with connection:
@@ -282,7 +293,7 @@ class DurableStore(TrialStore):
             row = db.execute("SELECT payload FROM records WHERE kind='trial' AND id=?", (trial.trial_id,)).fetchone()
             prior = db.execute("SELECT state FROM jobs WHERE id=?", (trial.trial_id,)).fetchone()
             status = json.loads(row[0]).get("status") if row else None
-            retry = bool(prior) and prior[0] == "error" and status == "error"
+            retry = bool(prior) and prior[0] in {"error", "cancelled"} and status == "error"
             if not row or not (status == "recorded" and not prior or retry):
                 raise ValueError("Recording is already queued or not validated")
             self.check_job_limits(db, trial.organization_id, subject)
@@ -317,18 +328,22 @@ class DurableStore(TrialStore):
         """Cancel only if the runner has not claimed the job; refund its unused admission reservation."""
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if db.execute("UPDATE jobs SET state='cancelled',finished=? WHERE id=? AND state='queued'",
-                          (time.time(), trial_id)).rowcount != 1:
+            job = db.execute("SELECT request_key FROM jobs WHERE id=? AND state='queued'", (trial_id,)).fetchone()
+            if not job or db.execute("UPDATE jobs SET state='cancelled',finished=? WHERE id=? AND state='queued'",
+                                     (time.time(), trial_id)).rowcount != 1:
                 return False
+            # A retried physical judge holds its own reservation; refund the attempt being cancelled.
+            retry = re.fullmatch(r"physical-judge:.+:retry:(.+)", job["request_key"] or "")
+            reservation = f"{trial_id}:judge-retry:{retry.group(1)}" if retry else trial_id
             has_reservations = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reservations'").fetchone()
             row = db.execute("SELECT organization_id,cents FROM reservations WHERE trial_id=?",
-                             (trial_id,)).fetchone() if has_reservations else None
+                             (reservation,)).fetchone() if has_reservations else None
             if row:
                 # Nothing executed, so no external cost was incurred for this reservation.
                 for account in ("platform", row["organization_id"]):
                     db.execute("UPDATE budgets SET used_cents=MAX(0,used_cents-?) WHERE id=?", (row["cents"], account))
-                db.execute("DELETE FROM reservations WHERE trial_id=?", (trial_id,))
+                db.execute("DELETE FROM reservations WHERE trial_id=?", (reservation,))
         return True
 
     def claim(self):

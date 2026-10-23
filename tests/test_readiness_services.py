@@ -37,6 +37,8 @@ def private_api(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "path", tmp_path / "api.sqlite3")
     monkeypatch.setattr(store, "scenarios", {})
     monkeypatch.setattr(store, "trials", {})
+    from ghost_trials.security import MinuteCounter
+    monkeypatch.setattr(access, "failures", MinuteCounter())
     return app, settings, store, tokens
 
 
@@ -379,6 +381,25 @@ async def test_failed_sign_in_flood_cannot_lock_out_a_valid_sign_in(private_api,
         assert codes[:5] == [401] * 5 and set(codes[5:]) == {429}
         login = await client.post("/auth/session", headers=origin, json={"token": tokens["operator"]})
     assert login.status_code == 303 and "ghost_session" in login.cookies
+    # The flood cost no rate-limit rows, and only in-budget failures were audited.
+    with store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM rate_limits WHERE key LIKE 'login%'").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM audit WHERE action='login_failed'").fetchone()[0] == 5
+
+
+@pytest.mark.asyncio
+async def test_a_guessing_client_is_refused_before_token_comparison(private_api, monkeypatch):
+    app, settings, store, tokens = private_api
+    monkeypatch.setattr(settings, "ghost_trusted_proxy_hops", 1)
+    monkeypatch.setattr(settings, "ghost_max_client_auth_attempts_per_minute", 3)
+    guesser = {"Origin": "https://console.test", "X-Forwarded-For": "198.51.100.7"}
+    other = {"Origin": "https://console.test", "X-Forwarded-For": "203.0.113.9"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        for _ in range(3):
+            assert (await client.post("/auth/session", headers=guesser, json={"token": "x" * 48})).status_code == 401
+        # Even a correct guess from that address is refused, while everyone else signs in normally.
+        assert (await client.post("/auth/session", headers=guesser, json={"token": tokens["operator"]})).status_code == 429
+        assert (await client.post("/auth/session", headers=other, json={"token": tokens["operator"]})).status_code == 303
 
 
 @pytest.mark.asyncio
@@ -390,6 +411,10 @@ async def test_pages_enforce_csp_and_reports_are_accepted(private_api):
             response = await client.get(path, follow_redirects=True)
             assert response.headers["content-security-policy"] == PAGE_CSP, path
         assert "'unsafe-eval'" not in PAGE_CSP and "frame-ancestors 'none'" in PAGE_CSP
+        # Same-origin evidence previews are framed by the workspace; Dynamic deployments allow Dynamic.
+        assert "frame-src 'self'" in PAGE_CSP
+        from ghost_trials.csp import page_csp
+        assert "dynamicauth.com" in page_csp("dynamic") and "auth.privy.io" not in page_csp("dynamic")
         assert "content-security-policy" not in (await client.get("/health")).headers
         report = {"csp-report": {"effective-directive": "script-src-elem", "blocked-uri": "https://evil.test/x.js?token=secret"}}
         response = await client.post("/csp-report", content=json.dumps(report), headers={"Content-Type": "application/csp-report"})
@@ -435,3 +460,32 @@ async def test_rejected_form_token_returns_to_the_sign_in_page(private_api):
         response = await client.post("/auth/session", content="token=wrong", headers={
             "Origin": "https://console.test", "Content-Type": "application/x-www-form-urlencoded"})
     assert response.status_code == 303 and response.headers["location"] == "/auth/login?token_error=invalid"
+
+
+@pytest.mark.asyncio
+async def test_recovery_drops_partial_bundles_but_keeps_finished_ones(tmp_path):
+    from types import SimpleNamespace
+    from ghost_trials.jobs import JobRunner
+    from ghost_trials.models import Trial, TrialStatus
+    store = DurableStore(tmp_path / "state.sqlite3")
+    for trial_id, status in (("trl_cut", TrialStatus.SIMULATING), ("trl_scoring", TrialStatus.SCORING)):
+        await store.put_trial(Trial(trial_id=trial_id, scenario_id="scn", status=status))
+    root = tmp_path / "artifacts"
+    (root / "trials" / "trl_cut").mkdir(parents=True)
+    (root / "trials" / "trl_cut" / "telemetry.jsonl").write_text("{}")
+    (root / "trials" / "trl_scoring").mkdir(parents=True)
+    (root / "trials" / "trl_scoring" / "verification.json").write_text("{}")
+    await JobRunner(store, None, SimpleNamespace(ghost_artifact_root=root)).recover()
+    assert not (root / "trials" / "trl_cut").exists()
+    assert (root / "trials" / "trl_scoring" / "verification.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_token_form_returns_to_a_workspace_route_only(private_api):
+    app, settings, store, tokens = private_api
+    form = {"Origin": "https://console.test", "Content-Type": "application/x-www-form-urlencoded"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        good = await client.post("/auth/session", content=f"token={tokens['viewer']}&next=%23%2Freports", headers=form)
+        evil = await client.post("/auth/session", content=f"token={tokens['viewer']}&next=https://evil.test", headers=form)
+    assert good.status_code == 303 and good.headers["location"] == "/app/#/reports"
+    assert evil.status_code == 303 and evil.headers["location"] == "/app/"

@@ -63,3 +63,13 @@ A second independent review (backend, frontend, deployment) found no Critical is
 | Sign-out left the identity provider signed in | Sign-out ends the Privy/Dynamic session on the login page |
 | "Hunt not found" right after starting a Hunt | New Hunt is shown immediately; forced refreshes are never stale |
 | Other fixes | Owner-only admin changes, maintenance mode for paid agent review, orphaned-job recovery, bounded broadcast and socket caps, streaming upload hashing, reconnect/poll backoff, per-submission idempotency keys, accessibility and copy fixes |
+
+### Final review of the fixes (23 October)
+
+An independent review of the fix diff found one High regression and several Medium/Low items, all fixed:
+failed sign-ins are now counted in memory, so a flood of junk tokens causes no database writes (audit rows
+only while within budget); a client that has spent its failure budget is refused before a deployment token
+is compared; restart recovery keeps finished evidence bundles; a physical judge retry rebuilds its recording
+URLs and a cancelled retry refunds its own reservation; the CSP allows same-origin evidence previews and has a
+Dynamic variant; validated recordings can be deleted to free storage; migrations apply atomically; the budget
+CLI refuses to run as root; the token form keeps the return route.

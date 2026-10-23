@@ -42,7 +42,7 @@ uv run python -m scripts.cpu_smoke --strategy grid --trials 9 --output data/cpu-
 
 To verify **both** implemented domains in one CPU-only command, run `uv run python -m scripts.multidomain_demo --output data/multidomain-demo`. This executes actual MuJoCo physics and a bundled agent process, then verifies, replays, and compares their saved failures. It neither deploys nor calls a paid provider.
 
-At the 23 October local verification snapshot, the full Python suite passed **229 tests** and all eight Playwright browser checks passed (`npm run check:ui`), including a mobile-sized Hunt/agent-trace flow. Those checks do not establish hosted sign-in, public frontend routing, physical G1 execution, or independent robotics review.
+At the 23 October local verification snapshot, the full Python suite passed **234 tests** and all eight Playwright browser checks passed (`npm run check:ui`), including a mobile-sized Hunt/agent-trace flow. Those checks do not establish hosted sign-in, public frontend routing, physical G1 execution, or independent robotics review.
 
 For a phone preview, use an authenticated HTTPS reverse proxy or tunnel and set `GHOST_PUBLIC_DEPLOYMENT=true` with individual sign-in and the exact HTTPS frontend origin. `make mobile` refuses a non-loopback bind without those safeguards. `make dev` and the default Docker Compose port bind to host loopback only; never expose an authentication-disabled development server to the LAN or internet.
 

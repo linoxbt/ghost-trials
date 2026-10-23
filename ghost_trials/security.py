@@ -13,15 +13,43 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
 from .accounts import Accounts, Principal
-from .csp import PAGE_CSP
+from .csp import page_csp
 
-SIGN_IN_PATHS = frozenset({"/auth/session", "/auth/privy/session", "/auth/dynamic/session"})
+# Routes that limit themselves in memory (failed credentials, CSP report logging) without database writes.
+SELF_LIMITED_PATHS = frozenset({"/auth/session", "/auth/privy/session", "/auth/dynamic/session", "/csp-report"})
+
+
+class MinuteCounter:
+    """In-memory per-minute counters for unauthenticated noise (failed sign-ins, CSP reports).
+
+    The API runs one process, so memory is authoritative, and a flood costs no database writes.
+    """
+
+    def __init__(self, max_keys=10000):
+        self.window, self.counts, self.max_keys = None, {}, max_keys
+
+    def _current(self):
+        window = int(time.time() // 60)
+        if window != self.window:
+            self.window, self.counts = window, {}
+        return self.counts
+
+    def hit(self, key, limit) -> bool:
+        counts = self._current()
+        if key not in counts and len(counts) >= self.max_keys:
+            key = "overflow"
+        counts[key] = counts.get(key, 0) + 1
+        return counts[key] <= limit
+
+    def exhausted(self, key, limit) -> bool:
+        return self._current().get(key, 0) >= limit
 
 
 class AccessControl:
     def __init__(self, settings, store):
         self.settings, self.store = settings, store
         self.accounts = Accounts(store, settings)
+        self.failures = MinuteCounter()
         self.tokens = {role: token for role, token in {
             "admin": settings.ghost_admin_token, "operator": settings.ghost_operator_token,
             "viewer": settings.ghost_viewer_token}.items() if token}
@@ -162,21 +190,31 @@ class AccessControl:
             return None if forwarded else (connection.client.host if connection.client else None)
         return forwarded[-hops] if len(forwarded) >= hops else (forwarded[0] if forwarded else None)
 
-    def auth_failure(self, request, bucket, error):
+    def auth_failure(self, request, bucket, error, record=None):
         """Count a rejected credential; 429 once the per-client or platform failure budget is spent.
 
         Only failures are counted and only after verification, so a flood of junk credentials can never
-        turn away a valid sign-in. Signed provider JWTs and 32+ character tokens make guessing infeasible.
+        turn away a valid sign-in. Counting is in memory and `record` (an audit write) runs only while
+        within budget, so a flood cannot saturate the database either.
         """
         if error.status_code != 401:
             raise error  # provider outages and misconfiguration are not attempts
         client = self.client_ip(request)
-        within = self.store.rate_allowed(f"{bucket}:failed", self.settings.ghost_max_auth_attempts_per_minute)
+        within = self.failures.hit(f"{bucket}:failed", self.settings.ghost_max_auth_attempts_per_minute)
         if client:
-            within = self.store.rate_allowed(f"{bucket}:failed:{client}", self.settings.ghost_max_client_auth_attempts_per_minute) and within
+            within = self.failures.hit(f"{bucket}:failed:{client}", self.settings.ghost_max_client_auth_attempts_per_minute) and within
         if not within:
             raise HTTPException(429, "Too many failed sign-in attempts", headers={"Retry-After": "60"}) from error
+        if record:
+            record()
         raise error
+
+    def guessing_blocked(self, request, bucket) -> bool:
+        """A known client that has spent its failure budget is refused before a static token is compared,
+        which stops guessing from that address while never affecting anyone else."""
+        client = self.client_ip(request)
+        return bool(client) and self.failures.exhausted(f"{bucket}:failed:{client}",
+                                                        self.settings.ghost_max_client_auth_attempts_per_minute)
 
     def origin_allowed(self, request):
         allowed = {value.strip().rstrip("/") for value in self.settings.ghost_allowed_origins.split(",") if value.strip()}
@@ -203,12 +241,12 @@ class AccessControl:
                 r"/physical/sessions/phy_[a-f0-9]{24}/artifacts/(response\.mp4|telemetry\.jsonl|capture\.json)", path))
             identity = principal.subject if principal and principal.kind in {"privy", "dynamic"} else self.role(request)
             limit = self.settings.ghost_physical_max_chunks_per_minute if physical_chunk else self.settings.ghost_max_requests_per_minute
-            if identity:
-                allowed = self.store.rate_allowed(("recording-upload:" if physical_chunk else "mutation:") + identity, limit)
-            elif path in SIGN_IN_PATHS:
-                # Sign-in routes count failed credentials themselves; a shared anonymous bucket here
-                # would let junk requests lock everyone out.
+            if path in SELF_LIMITED_PATHS:
+                # A shared anonymous bucket here would let junk requests lock everyone out of sign-in, and
+                # browser CSP reports must not spend a signed-in person's request budget.
                 allowed = True
+            elif identity:
+                allowed = self.store.rate_allowed(("recording-upload:" if physical_chunk else "mutation:") + identity, limit)
             else:
                 client = self.client_ip(request)
                 allowed = ((not client or self.store.rate_allowed("mutation:anonymous:" + client, limit))
@@ -237,5 +275,5 @@ class AccessControl:
         # Application pages get the enforced policy; evidence previews keep their own framing rules.
         if (response.headers.get("content-type", "").startswith("text/html")
                 and not path.startswith(("/artifacts/", "/generated/", "/api/"))):
-            response.headers.setdefault("Content-Security-Policy", PAGE_CSP)
+            response.headers.setdefault("Content-Security-Policy", page_csp(self.settings.ghost_auth_provider))
         return response

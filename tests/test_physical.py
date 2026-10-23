@@ -290,6 +290,8 @@ async def test_failed_physical_judge_keeps_evidence_and_can_be_retried(physical_
         await pipeline.run(tid)
         store.job_state(tid, "error")  # what the job runner records for a failed run
         assert store.trials[tid].status == TrialStatus.ERROR and store.trials[tid].metrics is not None
+        # Even if an earlier failure cleared the metrics, the retry re-verifies the recording from disk.
+        store.trials[tid].metrics = None
         assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
         await pipeline.run(tid)
         assert store.trials[tid].status == TrialStatus.DONE and calls == ["physical", "physical"]
@@ -297,3 +299,54 @@ async def test_failed_physical_judge_keeps_evidence_and_can_be_retried(physical_
         assert access.accounts.budget(org)["used_cents"] == 200
         assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
         assert access.accounts.budget(org)["used_cents"] == 200
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_validated_recording_frees_its_storage(physical_api, fixture_bundle, monkeypatch):
+    app, access, store, settings, token = physical_api
+    root, setup, _ = fixture_bundle
+    bundle = sum(record["bytes"] for record in manifest(root).values())
+    monkeypatch.setattr(settings, "ghost_physical_org_storage_bytes", bundle + 1)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        await signin(client, token())
+        first = (await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        route = await upload(client, first, root)
+        assert (await client.post(route+"/validate", headers=ORIGIN)).json()["status"] == "validated"
+        second = (await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        second_route = "/physical/sessions/" + second["session_id"]
+        assert (await client.delete(second_route, headers=ORIGIN)).status_code == 409  # pending: cancel instead
+        assert (await client.put(second_route+"/manifest", json=manifest(root), headers=ORIGIN)).status_code == 507
+        deleted = await client.delete(route, headers=ORIGIN)
+        assert deleted.status_code == 200 and deleted.json()["status"] == "deleted"
+        assert not (settings.ghost_artifact_root / "physical" / first["session_id"]).exists()
+        assert (await client.get(route+"/artifacts/response.mp4")).status_code == 404
+        assert (await client.put(second_route+"/manifest", json=manifest(root), headers=ORIGIN)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_judge_retry_refunds_that_attempt(physical_api, fixture_bundle, monkeypatch):
+    app, access, store, settings, token = physical_api
+    from ghost_trials.app import pipeline
+    class FailingJudge:
+        async def judge(self, scenario, metrics):
+            raise RuntimeError("provider timeout")
+    monkeypatch.setattr(pipeline, "judge", FailingJudge())
+    for key, value in {"ghost_judge_provider":"nebius", "ghost_live_execution_enabled":True,
+        "ghost_provider_spending_controls_confirmed":True,"ghost_platform_budget_cents":10000,
+        "ghost_live_job_reservation_cents":100}.items(): monkeypatch.setattr(settings, key, value)
+    root, setup, _ = fixture_bundle
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        org = await signin(client, token()); access.accounts.allocate_budget(org, 1000)
+        session = (await client.post("/physical/sessions", json=setup, headers=ORIGIN)).json()
+        route = await upload(client, session, root)
+        tid = (await client.post(route+"/validate", headers=ORIGIN)).json()["trial_id"]
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        await pipeline.run(tid)
+        store.job_state(tid, "error")
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        assert access.accounts.budget(org)["used_cents"] == 200
+        assert (await client.post(f"/trials/{tid}/cancel", headers=ORIGIN)).status_code == 200
+        # Only the cancelled retry is refunded; the first, executed attempt stays charged.
+        assert access.accounts.budget(org)["used_cents"] == 100
+        assert (await client.post(route+"/judge", headers=ORIGIN)).status_code == 202
+        assert store.job(tid)["state"] == "queued"

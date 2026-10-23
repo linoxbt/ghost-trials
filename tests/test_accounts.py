@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import uuid
@@ -481,7 +482,10 @@ def test_budget_cli_sets_and_lists_workspace_budgets(identities, monkeypatch, ca
     monkeypatch.setattr(budget, "get_settings", lambda: settings)
     monkeypatch.setattr(settings, "ghost_data_path", store.path)
     principal = access.accounts.start_session(access.accounts.verify(token()))[1]
-    budget.main(["set", principal.organization_id, "150"])
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        with pytest.raises(SystemExit):
+            budget.main(["list"])  # refused as root without --allow-root
+    budget.main(["--allow-root", "set", principal.organization_id, "150"])
     assert access.accounts.budget(principal.organization_id) == {"limit_cents": 150, "used_cents": 0}
-    budget.main(["list"])
+    budget.main(["--allow-root", "list"])
     assert f"{principal.organization_id}\tMy evaluation lab\tlimit=150¢\treserved=0¢" in capsys.readouterr().out
