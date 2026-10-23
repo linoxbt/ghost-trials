@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" fill="none">
-  <title>Ghost Trials — Sentinel mark</title>
-  <desc>A shield-shaped ghost with a precision-cut G and a watchful eye, representing protection and observation.</desc>
-  <path d="M32 3 57 13v23c0 14-10 25-25 33C17 61 7 50 7 36V13L32 3Z" fill="#F36B2B"/>
-  <path d="M20 45V28c0-8 5-13 12-13s12 5 12 13v19l-8-5-8 5-8-2Z" fill="#191B1E"/>
-  <path d="M33 28h13v7H33z" fill="#F36B2B"/>
-  <path d="M23 27h5v5h-5z" fill="#FFF6EC"/>
-</svg>
