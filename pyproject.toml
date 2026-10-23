@@ -31,7 +31,7 @@ dev = [
 [tool.ruff]
 target-version = "py311"
 line-length = 160
-extend-exclude = ["video", "netlify-dist", "node_modules"]
+extend-exclude = ["netlify-dist", "node_modules"]
 
 [tool.ruff.lint]
 # Correctness-focused: undefined names, unused imports/variables, syntax errors.

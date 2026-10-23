@@ -14,9 +14,6 @@ netlify-dist
 node_modules
 static/auth
 # Not needed in the image; keeps the build context small.
-video
 tests
 docs
 .github
-submission.pdf
-submission.md

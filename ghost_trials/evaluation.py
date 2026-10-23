@@ -266,7 +266,7 @@ def demonstration_readiness(trials: list[Trial]) -> dict:
                 "Saved response video, raw telemetry, checkpoint identity and executed configuration",
                 "Server artifact validation and a live Nemotron finding",
                 "Human inspection of video alignment, measurements, provenance and limitations"],
-            "limitations": ["This is a narrow evidence milestone, not hackathon eligibility or submission approval.",
+            "limitations": ["This is a narrow evidence milestone, not an approval or certification.",
                 "Operator-declared physical recordings remain separately inspectable, not attested.",
                 "Synthetic fixtures and API connectivity tests cannot complete the milestone."]}
 

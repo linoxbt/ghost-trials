@@ -1,4 +1,4 @@
-# Evaluation methodology and submission readiness
+# Evaluation methodology
 
 > **Scope note (22 October 2026):** this page describes the GPU/Cosmos evaluation path (`warehouse-evaluation-v3` rubric). The demonstrated CPU MuJoCo path uses the measured target-band rubric described in [CPU_MIGRATION.md](CPU_MIGRATION.md) and [HUNT.md](HUNT.md).
 
@@ -68,13 +68,3 @@ This produces an agreement rate, confusion matrix, Cohen's kappa where defined, 
 - Gather a human-reviewed sample and report label agreement and disagreements. No human-validation result is claimed by this repository.
 - The implemented bounded adaptive failure search must be GPU-validated against random search under the same trial budget before claims about search efficiency.
 - Obtain feedback from a robotics evaluation engineer on the report and the release decision it supports.
-
-## Under-three-minute demo
-
-1. 0:00–0:20: a genuine recorded failure, labeled with policy and scenario.
-2. 0:20–0:40: identify the engineer's problem and show the execution configuration.
-3. 0:40–1:45: show real key modules executing; inspect video and telemetry.
-4. 1:45–2:25: compare a matched pair and inspect benchmark limitations.
-5. 2:25–2:50: export the evidence report, explain Nebius/NVIDIA usage and remaining limits.
-
-Keep a clearly labeled previously recorded run available for outages. Do not portray replay as live generation. Publish the repository with its license, setup instructions, tools feedback, and any pre-hackathon changes disclosed. Confirm the official rules before submission.
