@@ -66,6 +66,7 @@ async function main(){
     assert.equal(await page.getByText('Account ID').count(),0);
     assert.equal(await page.locator('#navigation a[href="#/system"]').count(),0);
     assert.equal(await page.getByRole('link',{name:'Physical recordings'}).count(),1);
+    assert.equal(await page.locator('.account-tools a[href="#/team"]').getAttribute('class'),'button primary');
     await page.goto('http://127.0.0.1:8765/app/#/system');
     await page.getByRole('heading',{name:'Page not found'}).waitFor();
     await page.goto('http://127.0.0.1:8765/app/#/account');
