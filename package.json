@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@dynamic-labs/sdk-react-core": "5.10.0",
-    "@privy-io/react-auth": "3.45.0",
+    "@privy-io/react-auth": "3.50.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
