@@ -23,7 +23,7 @@ physics = [] # Compatibility alias; MuJoCo is now a required CPU runtime depende
 models = ["huggingface-hub>=0.34,<2"]
 storage = ["boto3>=1.40,<2"]
 dev = [
-  "pytest>=8.4,<9",
+  "pytest>=8.4,<10",
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.6,<1",
 ]
